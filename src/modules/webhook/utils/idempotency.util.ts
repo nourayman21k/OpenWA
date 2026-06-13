@@ -32,15 +32,17 @@ export function generateIdempotencyKey(event: string, data: Record<string, unkno
   switch (event) {
     case 'message.received':
     case 'message.sent':
-      // Message ID is unique per message
-      return `msg_${toStr(data.messageId) || toStr(data.id)}`;
+      // Dispatched payload is an IncomingMessage, which carries `id`; fall back to a legacy `messageId`.
+      // Resolve the value before toStr() — toStr() returns a truthy 'unknown' fallback, so chaining with
+      // `||` would short-circuit before reaching the second field.
+      return `msg_${toStr(data.id ?? data.messageId)}`;
 
     case 'message.ack':
       // Message ID + ack status together are unique
-      return `ack_${toStr(data.messageId)}_${toStr(data.ack, '0')}`;
+      return `ack_${toStr(data.id ?? data.messageId)}_${toStr(data.ack, '0')}`;
 
     case 'message.revoked':
-      return `rev_${toStr(data.messageId)}`;
+      return `rev_${toStr(data.id ?? data.messageId)}`;
 
     case 'session.status':
       // Session + status combo (same status emitted once per transition)

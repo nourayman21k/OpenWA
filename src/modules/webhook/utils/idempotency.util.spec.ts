@@ -12,6 +12,27 @@ describe('Idempotency Utils', () => {
       expect(key).toBe('ack_ABC123_3');
     });
 
+    it('should use the IncomingMessage `id` field for message.received (the real dispatch shape)', () => {
+      // session.service dispatches the IncomingMessage object, which carries `id`, not `messageId`.
+      const key = generateIdempotencyKey('message.received', { id: 'ABC123' });
+      expect(key).toBe('msg_ABC123');
+    });
+
+    it('should prefer `id` over a legacy `messageId` when both are present for message.received', () => {
+      const key = generateIdempotencyKey('message.received', { id: 'REAL', messageId: 'LEGACY' });
+      expect(key).toBe('msg_REAL');
+    });
+
+    it('should use the `id` field for message.ack (the real dispatch shape)', () => {
+      const key = generateIdempotencyKey('message.ack', { id: 'ABC123', ack: 3 });
+      expect(key).toBe('ack_ABC123_3');
+    });
+
+    it('should use the `id` field for message.revoked (the real dispatch shape)', () => {
+      const key = generateIdempotencyKey('message.revoked', { id: 'ABC123' });
+      expect(key).toBe('rev_ABC123');
+    });
+
     it('should generate key for session.status', () => {
       const key = generateIdempotencyKey('session.status', {
         sessionId: 'sess_1',
