@@ -118,7 +118,11 @@ export function ApiKeys() {
           return (
             <span className="key-cell">
               <code>{visibleKeys.has(apiKey.id) ? apiKey.keyPrefix + '...' : apiKey.keyPrefix + '****'}</code>
-              <button className="icon-btn-sm" onClick={() => toggleKeyVisibility(apiKey.id)}>
+              <button
+                className="icon-btn-sm"
+                onClick={() => toggleKeyVisibility(apiKey.id)}
+                aria-label={visibleKeys.has(apiKey.id) ? t('common.hideApiKey') : t('common.showApiKey')}
+              >
                 {visibleKeys.has(apiKey.id) ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </span>

@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DB hiccup on the busy message path can no longer drop the event silently or take the process down.
 - **Audit-log writes are best-effort.** A failed audit insert is logged and swallowed instead of turning
   an otherwise-successful operation (create/delete/start/stop session, etc.) into a `500`.
+- **Dashboard accessibility:** toast notifications are now an ARIA live region (`role="region"`/`aria-live`,
+  with `role="alert"` on error/warning toasts) so screen readers announce success/error feedback, and the
+  toast close button has an accessible name. The API-key visibility toggles on the Login and API Keys pages
+  now have state-reflecting `aria-label`s (show/hide). New `common.showApiKey`/`common.hideApiKey` strings
+  across all locales.
 
 ## [0.2.8] - 2026-06-17
 
