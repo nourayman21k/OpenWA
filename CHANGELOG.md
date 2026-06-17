@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Write endpoints for groups, contacts, labels, channels, catalog, and status now require the
+  `OPERATOR` role**, closing an unintended privilege gap where a `VIEWER`-role API key could create/leave
+  groups, manage participants, block contacts, post statuses, send products, and mutate labels. Read
+  (`GET`) endpoints remain open to any valid key, matching the message/session controllers.
+  > ⚠️ If you used a `VIEWER` key for any of these write operations, switch it to `OPERATOR` (or `ADMIN`).
 - Patched a high-severity `ws` advisory (and a moderate `qs` DoS) on the live socket.io transport by
   bumping in-range deps (`ws`→8.21.0, `engine.io`→6.6.9, `qs`→6.15.2, plus the incidental
   re-resolutions `npm audit fix` pulled in) in both the API and dashboard. Lockfile-only — no
