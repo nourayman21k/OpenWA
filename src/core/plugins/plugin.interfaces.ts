@@ -5,6 +5,7 @@
 
 import { HookManager, HookEvent, HookHandler } from '../hooks';
 import type { MessageResponseDto } from '../../modules/message/dto';
+import type { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 
 // ============================================================================
 // Plugin Types
@@ -108,6 +109,14 @@ export interface PluginMessagingCapability {
   ): Promise<MessageResponseDto>;
 }
 
+export interface PluginEngineReadCapability {
+  getGroupInfo(sessionId: string, groupId: string): ReturnType<IWhatsAppEngine['getGroupInfo']>;
+  getContacts(sessionId: string): ReturnType<IWhatsAppEngine['getContacts']>;
+  getContactById(sessionId: string, contactId: string): ReturnType<IWhatsAppEngine['getContactById']>;
+  checkNumberExists(sessionId: string, phone: string): ReturnType<IWhatsAppEngine['checkNumberExists']>;
+  getChats(sessionId: string): ReturnType<IWhatsAppEngine['getChats']>;
+}
+
 // ============================================================================
 // Plugin Context (passed to plugin on initialization)
 // ============================================================================
@@ -134,6 +143,9 @@ export interface PluginContext {
 
   // Curated write surface — routes through MessageService (persistence preserved).
   messages: PluginMessagingCapability;
+
+  // Read-only, scoped engine queries.
+  engine: PluginEngineReadCapability;
 }
 
 export interface PluginLogger {

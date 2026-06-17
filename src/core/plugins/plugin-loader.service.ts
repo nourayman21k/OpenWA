@@ -7,6 +7,7 @@ import { createLogger } from '../../common/services/logger.service';
 import { HookManager } from '../hooks';
 import {
   PluginCapabilityError,
+  PluginEngineReadCapability,
   PluginManifest,
   PluginMessagingCapability,
   PluginInstance,
@@ -18,6 +19,8 @@ import {
 } from './plugin.interfaces';
 import { PluginStorageService } from './plugin-storage.service';
 import { MessageService } from '../../modules/message/message.service';
+import { SessionService } from '../../modules/session/session.service';
+import type { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.interface';
 
 /**
  * Resolve a plugin's `main` entry to an absolute path, asserting it stays inside
@@ -294,6 +297,22 @@ export class PluginLoaderService implements OnModuleInit {
     }
   }
 
+  /**
+   * Scope-check, then resolve the live engine for a session. getEngine returns undefined for an
+   * unknown OR unstarted session (no throw), so guard it into a defined PluginCapabilityError.
+   * A present-but-not-READY engine throws EngineNotReadyError from the adapter on use (→ 409).
+   */
+  private resolveEngine(manifest: PluginManifest, sessionId: string): IWhatsAppEngine {
+    this.assertSessionAllowed(manifest, sessionId);
+    const engine = this.moduleRef.get(SessionService, { strict: false }).getEngine(sessionId);
+    if (!engine) {
+      throw new PluginCapabilityError(
+        `Session ${sessionId} has no active engine (unknown or not started)`,
+      );
+    }
+    return engine;
+  }
+
   private createPluginContext(plugin: PluginInstance): PluginContext {
     const pluginLogger: PluginLogger = {
       log: (message, meta) =>
@@ -332,6 +351,16 @@ export class PluginLoaderService implements OnModuleInit {
             .reply(sessionId, { chatId, quotedMessageId, text });
         },
       } satisfies PluginMessagingCapability,
+      engine: {
+        getGroupInfo: async (sessionId, groupId) =>
+          this.resolveEngine(plugin.manifest, sessionId).getGroupInfo(groupId),
+        getContacts: async sessionId => this.resolveEngine(plugin.manifest, sessionId).getContacts(),
+        getContactById: async (sessionId, contactId) =>
+          this.resolveEngine(plugin.manifest, sessionId).getContactById(contactId),
+        checkNumberExists: async (sessionId, phone) =>
+          this.resolveEngine(plugin.manifest, sessionId).checkNumberExists(phone),
+        getChats: async sessionId => this.resolveEngine(plugin.manifest, sessionId).getChats(),
+      } satisfies PluginEngineReadCapability,
     };
   }
 
