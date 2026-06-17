@@ -453,7 +453,8 @@
       "messageId": "معرّف الرسالة",
       "error": "خطأ"
     },
-    "sendFailed": "فشل إرسال الرسالة"
+    "sendFailed": "فشل إرسال الرسالة",
+    "notOnWhatsApp": "هذا الرقم غير مسجَّل على واتساب"
   },
   "infrastructure": {
     "title": "البنية التحتية",

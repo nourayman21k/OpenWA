@@ -358,6 +358,22 @@ export const templateApi = {
 };
 
 // =============================================================================
+// Contact API
+// =============================================================================
+
+export interface CheckNumberResponse {
+  number: string;
+  exists: boolean;
+  /** Engine-canonical WhatsApp id for the number (e.g. `…@c.us` or `…@lid`), or null if unregistered. */
+  whatsappId: string | null;
+}
+
+export const contactApi = {
+  checkNumber: (sessionId: string, number: string) =>
+    request<CheckNumberResponse>(`/sessions/${sessionId}/contacts/check/${encodeURIComponent(number)}`),
+};
+
+// =============================================================================
 // API Key API
 // =============================================================================
 

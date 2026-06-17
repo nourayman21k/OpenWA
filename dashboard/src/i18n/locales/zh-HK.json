@@ -453,7 +453,8 @@
       "messageId": "訊息 ID",
       "error": "錯誤"
     },
-    "sendFailed": "傳送訊息失敗"
+    "sendFailed": "傳送訊息失敗",
+    "notOnWhatsApp": "此號碼未在 WhatsApp 註冊"
   },
   "infrastructure": {
     "title": "基礎架構",

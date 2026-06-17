@@ -453,7 +453,8 @@
       "messageId": "Message ID",
       "error": "Error"
     },
-    "sendFailed": "Failed to send message"
+    "sendFailed": "Failed to send message",
+    "notOnWhatsApp": "This number is not registered on WhatsApp"
   },
   "infrastructure": {
     "title": "Infrastructure",

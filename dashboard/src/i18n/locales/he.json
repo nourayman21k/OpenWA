@@ -453,7 +453,8 @@
       "messageId": "מזהה הודעה",
       "error": "שגיאה"
     },
-    "sendFailed": "שליחת ההודעה נכשלה"
+    "sendFailed": "שליחת ההודעה נכשלה",
+    "notOnWhatsApp": "מספר זה אינו רשום בוואטסאפ"
   },
   "infrastructure": {
     "title": "תשתית",
