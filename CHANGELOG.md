@@ -28,6 +28,13 @@ plugins instead of in core (#265).
 - **`auto-reply` reference extension plugin**, first-party and **registered disabled by default** — enable
   it via `POST /plugins/auto-reply/enable` to exercise the capability layer end-to-end. (#294)
 
+### Changed
+
+- Engine config is now **opaque per-engine**: `EngineFactory` passes only engine-neutral fields
+  (`sessionId`/`proxyUrl`/`proxyType`) to an engine plugin and supplies engine-specific config (Puppeteer
+  for whatsapp-web.js) as a blob via the plugin context, so a non-browser engine can be added without the
+  factory knowing browser fields. No env-var or behavior change for existing deployments. (#296)
+
 ## [0.2.10] - 2026-06-17
 
 Completes the v0.2.9 non-breaking batch with three dashboard/CI follow-ups that belonged to the same
