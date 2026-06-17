@@ -16,7 +16,6 @@ plugins instead of in core (#265).
 
 ### Added
 
-- **Baileys engine (minimal slice)** — `ENGINE_TYPE=baileys` now selects a second, browser-free WhatsApp engine built on `@whiskeysockets/baileys` (WebSocket/Noise protocol, no Chromium). This first slice supports linking (QR + pairing code), sending and receiving **text**, recipient resolution, and typing presence; all other operations return HTTP 501 until later slices add a message store. Config: `BAILEYS_AUTH_DIR` (default `./data/baileys`). Proxy is not yet supported on this engine. (#PR)
 - **Plugin capability layer (Tier-2 extension plugins):** scoped `ctx.messages` (`sendText` / `reply`,
   routed through `MessageService` so persistence and the send pipeline are preserved) and read-only
   `ctx.engine` (`getGroupInfo` / `getContacts` / `getContactById` / `checkNumberExists` / `getChats`) on
@@ -28,9 +27,11 @@ plugins instead of in core (#265).
   documented as out of scope for now). (#294)
 - **`auto-reply` reference extension plugin**, first-party and **registered disabled by default** — enable
   it via `POST /plugins/auto-reply/enable` to exercise the capability layer end-to-end. (#294)
+- **Baileys engine (minimal slice)** — `ENGINE_TYPE=baileys` now selects a second, browser-free WhatsApp engine built on `@whiskeysockets/baileys` (WebSocket/Noise protocol, no Chromium). This first slice supports linking (QR + pairing code), sending and receiving **text**, recipient resolution, and typing presence; all other operations return HTTP 501 until later slices add a message store. Config: `BAILEYS_AUTH_DIR` (default `./data/baileys`). Proxy is not yet supported on this engine. (#PR)
 
 ### Changed
 
+- ⚠️ **Node.js ≥ 20.19 now required.** The Baileys engine dependency (`@whiskeysockets/baileys`) is ESM-only and is loaded at startup, so OpenWA now requires Node ≥ 20.19 (for `require()` of ESM). Operators on older Node must upgrade. (#PR)
 - Engine config is now **opaque per-engine**: `EngineFactory` passes only engine-neutral fields
   (`sessionId`/`proxyUrl`/`proxyType`) to an engine plugin and supplies engine-specific config (Puppeteer
   for whatsapp-web.js) as a blob via the plugin context, so a non-browser engine can be added without the

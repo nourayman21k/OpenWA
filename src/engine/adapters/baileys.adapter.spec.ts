@@ -186,6 +186,9 @@ describe('BaileysAdapter messaging', () => {
     const adapter = newAdapter();
     await adapter.initialize({});
     await expect(adapter.sendTextMessage('x', 'y')).rejects.toBeInstanceOf(EngineNotReadyError);
+    await expect(adapter.checkNumberExists('628111')).rejects.toBeInstanceOf(EngineNotReadyError);
+    await expect(adapter.getNumberId('628111')).rejects.toBeInstanceOf(EngineNotReadyError);
+    await expect(adapter.sendChatState('628111@s.whatsapp.net', 'typing')).rejects.toBeInstanceOf(EngineNotReadyError);
   });
 });
 

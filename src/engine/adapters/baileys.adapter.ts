@@ -425,7 +425,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
         continue; // protocol/empty messages carry no neutral content
       }
       const incoming = this.mapMessage(msg);
-      if (msg.key.fromMe) {
+      if (msg.key.fromMe === true) {
         this.callbacks.onMessageCreate?.(incoming);
       } else {
         this.callbacks.onMessage?.(incoming);
