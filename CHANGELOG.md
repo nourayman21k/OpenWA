@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `package.json`/API change. The remaining advisories are build-only (`sqlite3`→`node-gyp`→`tar`)
   and require a breaking `sqlite3` major, deferred.
 
+### Added
+
+- **`LOG_LEVEL` is now honored.** It was read into config/compose but never applied (logging was hardcoded
+  to `info`); the level (`error`/`warn`/`info`/`debug`/`verbose`) is now set at bootstrap.
+- **Automatic audit-log retention.** Audit logs older than `AUDIT_RETENTION_DAYS` (default 90; `0` disables)
+  are pruned daily and once at startup — the existing `cleanup()` was never scheduled, so `audit_logs` grew
+  without bound.
+
 ### Fixed
 
 - **Bulk-message batch status is now correct on cancel and stop-on-error.** A cancelled batch could be
@@ -29,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counters; stop-on-error → `FAILED`; otherwise `COMPLETED`/`FAILED`).
 - Bulk-message item `type` is now validated against the allowed set (`text`/`image`/`video`/`audio`/`document`)
   with `@IsIn`, so an invalid type is rejected up front instead of failing mid-send.
+- **Graceful shutdown is now robust.** `onModuleDestroy` clears reconnect timers first and destroys engines
+  in parallel, each isolated and time-bounded — so one hung/throwing Chromium can no longer abort teardown
+  of the other sessions or stall shutdown.
+- **A session that exhausts its reconnect attempts is now marked `FAILED` with a reason** (surfaced via
+  `lastError`) instead of sitting silently `DISCONNECTED` forever.
+- **BullMQ webhook jobs are auto-evicted** (`removeOnComplete`/`removeOnFail` retention) so completed/failed
+  job payloads no longer accumulate unbounded in Redis (audit M19).
 
 ## [0.2.8] - 2026-06-17
 

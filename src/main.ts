@@ -4,6 +4,7 @@ import { SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ShutdownService } from './common/services/shutdown.service';
+import { LoggerService, LogLevel } from './common/services/logger.service';
 import { createSwaggerConfig } from './config/swagger.config';
 import {
   resolveCorsPolicy,
@@ -75,6 +76,12 @@ STORAGE_PATH=./data/media
 }
 
 async function bootstrap() {
+  // Apply the operator-configured log verbosity (LOG_LEVEL) before anything logs. Unset/invalid → INFO.
+  const requestedLevel = process.env.LOG_LEVEL?.trim().toLowerCase();
+  if (requestedLevel && (Object.values(LogLevel) as string[]).includes(requestedLevel)) {
+    LoggerService.setLogLevel(requestedLevel as LogLevel);
+  }
+
   // Fail fast: never start production with default/placeholder secrets.
   assertNoDefaultSecretsInProduction({
     nodeEnv: process.env.NODE_ENV,
