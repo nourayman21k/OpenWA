@@ -63,8 +63,20 @@ describe('AutoReplyPlugin', () => {
     const { context, getHandler } = makeContext(reply);
     await new AutoReplyPlugin().onEnable(context);
 
-    await getHandler()(ctxFor(inbound({ isGroup: true })));
+    const result = await getHandler()(ctxFor(inbound({ isGroup: true })));
 
     expect(reply).not.toHaveBeenCalled();
+    expect(result).toEqual({ continue: true });
+  });
+
+  it('does NOT reply when the message did not originate from the engine', async () => {
+    const reply = jest.fn();
+    const { context, getHandler } = makeContext(reply);
+    await new AutoReplyPlugin().onEnable(context);
+
+    const result = await getHandler()({ ...ctxFor(inbound()), source: 'API' });
+
+    expect(reply).not.toHaveBeenCalled();
+    expect(result).toEqual({ continue: true });
   });
 });
