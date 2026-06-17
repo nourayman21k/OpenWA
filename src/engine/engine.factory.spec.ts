@@ -31,11 +31,9 @@ describe('EngineFactory', () => {
     const factory = new EngineFactory(buildConfigService(), pluginLoader);
     factory.create({ sessionId: 'sess-1', proxyUrl: 'http://p', proxyType: 'http' });
 
+    // Plain-object (not objectContaining) assertion: any browser key (headless/puppeteerArgs/
+    // executablePath/sessionDataPath) leaking into the per-call config would fail this exact match.
     expect(createEngine).toHaveBeenCalledWith({ sessionId: 'sess-1', proxyUrl: 'http://p', proxyType: 'http' });
-    const passed = createEngine.mock.calls[0][0] as Record<string, unknown>;
-    for (const k of ['headless', 'puppeteerArgs', 'executablePath', 'sessionDataPath']) {
-      expect(passed).not.toHaveProperty(k);
-    }
   });
 
   it('registers the built-in engine with the opaque engine config blob (#219 guarantee moves to context.config)', async () => {
