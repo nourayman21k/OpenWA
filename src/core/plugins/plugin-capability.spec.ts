@@ -64,11 +64,18 @@ describe('PluginLoaderService capability facade — ctx.messages', () => {
   it('messages.reply delegates to MessageService.reply', async () => {
     const ctx = contextFor(makePlugin(['*']));
     await ctx.messages.reply('sess-1', '628@c.us', 'quoted-id', 'pong');
+    expect(moduleRef.get).toHaveBeenCalledWith(MessageService, { strict: false });
     expect(messageService.reply).toHaveBeenCalledWith('sess-1', {
       chatId: '628@c.us',
       quotedMessageId: 'quoted-id',
       text: 'pong',
     });
+  });
+
+  it('allows any session when manifest.sessions is absent (defaults to all)', async () => {
+    const ctx = contextFor(makePlugin()); // no sessions field
+    await ctx.messages.sendText('any-session', '628@c.us', 'hi');
+    expect(messageService.sendText).toHaveBeenCalledWith('any-session', { chatId: '628@c.us', text: 'hi' });
   });
 
   it('rejects an out-of-scope session BEFORE resolving the service', async () => {

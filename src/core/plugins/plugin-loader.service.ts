@@ -43,8 +43,8 @@ export class PluginLoaderService implements OnModuleInit {
     private readonly configService: ConfigService,
     private readonly hookManager: HookManager,
     private readonly pluginStorage: PluginStorageService,
-    // Resolves MessageService/SessionService lazily inside capability verbs. ModuleRef
-    // (not constructor injection) breaks the provider cycle
+    // Resolves MessageService/SessionService lazily inside capability verbs. ModuleRef is used
+    // instead of constructor injection to avoid the provider cycle
     // PluginLoaderService -> SessionService -> EngineFactory -> PluginLoaderService.
     private readonly moduleRef: ModuleRef,
   ) {
