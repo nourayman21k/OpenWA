@@ -1,6 +1,7 @@
 import { Injectable, Module, OnModuleInit } from '@nestjs/common';
 import { PluginLoaderService, PluginManifest, PluginType } from '../../core/plugins';
 import { AutoReplyPlugin } from './auto-reply';
+import { TranslationPlugin } from './translation';
 import { createLogger } from '../../common/services/logger.service';
 
 /**
@@ -28,6 +29,21 @@ export class ExtensionsRegistrar implements OnModuleInit {
 
     this.pluginLoader.registerBuiltInPlugin(autoReplyManifest, new AutoReplyPlugin());
     this.logger.log('Auto-reply reference plugin registered (disabled)');
+
+    const translationManifest: PluginManifest = {
+      id: 'translation',
+      name: 'Group Auto-Translation',
+      version: '1.0.0',
+      type: PluginType.EXTENSION,
+      description:
+        "Auto-translates group messages between participants' languages via LibreTranslate. Configure in-group with /tr commands. Disabled by default.",
+      main: 'index.ts',
+      permissions: ['messages:send'],
+      sessions: ['*'],
+    };
+
+    this.pluginLoader.registerBuiltInPlugin(translationManifest, new TranslationPlugin());
+    this.logger.log('Translation plugin registered (disabled)');
   }
 }
 
