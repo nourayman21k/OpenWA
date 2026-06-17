@@ -9,6 +9,8 @@
     "edit": "Modifica",
     "create": "Crea",
     "close": "Chiudi",
+    "showApiKey": "Mostra la chiave API",
+    "hideApiKey": "Nascondi la chiave API",
     "submit": "Invia",
     "confirm": "Conferma",
     "search": "Cerca",

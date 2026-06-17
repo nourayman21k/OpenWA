@@ -9,6 +9,8 @@
     "edit": "Edit",
     "create": "Create",
     "close": "Close",
+    "showApiKey": "Show API key",
+    "hideApiKey": "Hide API key",
     "submit": "Submit",
     "confirm": "Confirm",
     "search": "Search",
