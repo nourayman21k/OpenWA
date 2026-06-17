@@ -5,10 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.8] - 2026-06-17
+
+The engine-pluggability release: the whatsapp-web.js delivery-ack, message-type, and JID specifics are
+now decoupled behind the neutral engine interface (a different engine, e.g. Baileys, can map its own at
+the adapter boundary). Plus dashboard message templates, best-effort `@lid` → phone resolution, and a
+Docker fix for sessions stuck at "authenticating".
+
+> ⚠️ **Breaking for webhook consumers:** the `message.received`/`message.sent` `type` field is now a
+> neutral enum — incoming `chat` → `text`, `ptt` → `voice`, `vcard`/`multi_vcard` → `contact`. Update
+> any consumer that matched the raw whatsapp-web.js tokens. See **Changed** below.
 
 ### Added
 
+- **Message templates (dashboard).** Manage reusable message templates from a new dashboard page
+  (create/edit/delete, `{{variable}}` placeholders), backed by the existing `sessions/:id/templates`
+  API, with full i18n across all locales. Thanks @Leslie-23 (#266).
 - **Resolve a `@lid` privacy id to a phone number** (#263), engine-neutral via a new
   `IWhatsAppEngine.resolveContactPhone`. On-demand endpoint `GET /sessions/:id/contacts/:contactId/phone`
   → `{ contactId, phone }` (MSISDN digits, or `null` when the engine can't map it — best-effort, since
@@ -45,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `…@c.us` form (e.g. a `@lid` identifier) rather than echoing the input. And status/story
   broadcasts are flagged with a neutral `isStatusBroadcast` on the message payload, so engine-neutral code no longer
   matches the engine-specific `status@broadcast` pseudo-JID. A non-whatsapp-web.js engine supplies its own JID scheme.
+
 ### Fixed
 
 - The `WWEBJS_WEB_VERSION` (and `WWEBJS_WEB_VERSION_REMOTE_PATH`) workaround for sessions stuck at
@@ -53,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never reached the container — making the documented fix a no-op for Compose users. Added the passthrough
   (empty default = auto-select, no behavior change when unset) to `docker-compose.yml` and
   `docker-compose.dev.yml`. (#273)
+- Refined the Italian (`it`) dashboard translations. Thanks @albanobattistella (#272).
 
 ## [0.2.7] - 2026-06-16
 
