@@ -149,7 +149,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
       }
 
       // Recoverable (e.g. restartRequired right after pairing, transient drop) — reconnect.
-      this.callbacks.onDisconnected?.(`connection closed (${statusCode ?? 'unknown'})`);
+      // Do NOT fire onDisconnected here; this is a transient drop, not a terminal disconnect.
+      // connect() calls setStatus(INITIALIZING) which fires onStateChanged — that is the correct signal.
+      this.logger.log('Baileys connection dropped; reconnecting', { statusCode });
       this.connect().catch(err => {
         this.setStatus(EngineStatus.FAILED);
         this.callbacks.onError?.(err instanceof Error ? err.message : String(err));

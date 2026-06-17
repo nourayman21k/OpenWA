@@ -90,14 +90,16 @@ describe('BaileysAdapter lifecycle & status', () => {
     expect(makeWASocket).not.toHaveBeenCalled(); // no reconnect
   });
 
-  it('on a recoverable close: reconnects (re-creates the socket)', async () => {
+  it('on a recoverable close: reconnects (re-creates the socket) and does NOT fire onDisconnected', async () => {
+    const onDisconnected = jest.fn();
     const adapter = newAdapter();
-    await adapter.initialize(noopCallbacks({}));
+    await adapter.initialize(noopCallbacks({ onDisconnected }));
     const makeWASocket = jest.requireMock('@whiskeysockets/baileys').default as jest.Mock;
     makeWASocket.mockClear();
     fakeSock.fire('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 515 } } } });
     await new Promise(r => setImmediate(r)); // let the async connect() run
     expect(makeWASocket).toHaveBeenCalledTimes(1);
+    expect(onDisconnected).not.toHaveBeenCalled();
   });
 
   it('disconnect() ends the socket and does not reconnect', async () => {
@@ -106,6 +108,11 @@ describe('BaileysAdapter lifecycle & status', () => {
     await adapter.disconnect();
     expect(fakeSock.end).toHaveBeenCalled();
     expect(adapter.getStatus()).toBe(EngineStatus.DISCONNECTED);
+  });
+
+  it('requestPairingCode throws EngineNotReadyError before initialize()', async () => {
+    const adapter = newAdapter();
+    await expect(adapter.requestPairingCode('628999')).rejects.toBeInstanceOf(EngineNotReadyError);
   });
 
   it('requestPairingCode delegates to the socket', async () => {
@@ -134,6 +141,3 @@ describe('BaileysAdapter capability gating', () => {
   });
 });
 
-// Suppress unused import lint warning — EngineNotReadyError is the correct class to import
-// even though its direct use in tests is through the toBeInstanceOf check on thrown errors.
-void EngineNotReadyError;
