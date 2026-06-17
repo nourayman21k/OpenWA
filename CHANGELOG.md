@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`LOG_LEVEL` is now honored.** It was read into config/compose but never applied (logging was hardcoded
+  to `info`); the level (`error`/`warn`/`info`/`debug`/`verbose`) is now set at bootstrap.
+- **Automatic audit-log retention.** Audit logs older than `AUDIT_RETENTION_DAYS` (default 90; `0` disables)
+  are pruned daily and once at startup — the existing `cleanup()` was never scheduled, so `audit_logs` grew
+  without bound.
+
+### Fixed
+
+- **Graceful shutdown is now robust.** `onModuleDestroy` clears reconnect timers first and destroys engines
+  in parallel, each isolated and time-bounded — so one hung/throwing Chromium can no longer abort teardown
+  of the other sessions or stall shutdown.
+- **A session that exhausts its reconnect attempts is now marked `FAILED` with a reason** (surfaced via
+  `lastError`) instead of sitting silently `DISCONNECTED` forever.
+- **BullMQ webhook jobs are auto-evicted** (`removeOnComplete`/`removeOnFail` retention) so completed/failed
+  job payloads no longer accumulate unbounded in Redis (audit M19).
+
 ## [0.2.8] - 2026-06-17
 
 The engine-pluggability release: the whatsapp-web.js delivery-ack, message-type, and JID specifics are
