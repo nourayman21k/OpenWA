@@ -385,7 +385,7 @@
     }
   },
   "logs": {
-    "title": "Registri di Controllo",
+    "title": "Log di Controllo",
     "subtitle": "Traccia ed esamina tutte le azioni API e gli eventi di sistema",
     "exportCsv": "Esporta CSV",
     "searchPlaceholder": "Cerca nei log...",
@@ -404,8 +404,8 @@
       "severity": "Gravità"
     },
     "empty": {
-      "title": "Nessun registro trovato",
-      "description": "I registri di controllo appariranno qui man mano che verranno eseguite le azioni"
+      "title": "Nessun log trovato",
+      "description": "I log di audit appariranno qui man mano che verranno eseguite le azioni"
     }
   },
   "messageTester": {
@@ -455,7 +455,7 @@
   },
   "infrastructure": {
     "title": "Infrastruttura",
-    "subtitle": "Configura le impostazioni del server, del database, della cache, dello storage e del motore",
+    "subtitle": "Configura le impostazioni del server, del database, della cache, dell'archiviazione e del motore",
     "saveConfig": "Salva Configurazione",
     "saving": "Salvataggio...",
     "server": {
@@ -520,7 +520,7 @@
       "passwordOptional": "(opzionale)"
     },
     "storage": {
-      "title": "Configurazione Storage",
+      "title": "Configurazione di Archiviazione",
       "local": "Filesystem Locale",
       "localDesc": "Memorizza i file multimediali localmente",
       "s3": "Amazon S3",
