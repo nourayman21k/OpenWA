@@ -36,8 +36,22 @@ export class TranslationPlugin implements IPlugin {
   private coordinator: TranslationCoordinator | null = null;
 
   onEnable(context: PluginContext): Promise<void> {
-    const cfg = context.config;
+    this.coordinator = this.buildCoordinator(context);
+    context.registerHook('message:received', ctx => this.onMessage(context, ctx as HookContext<IncomingMessage>));
+    context.logger.log('Translation plugin enabled', { action: 'translation_enabled' });
+    return Promise.resolve();
+  }
 
+  onConfigChange(context: PluginContext): Promise<void> {
+    // Rebuild the coordinator so a config edit (e.g. a new LibreTranslate URL/key saved from the
+    // dashboard) takes effect immediately, without a disable/enable cycle.
+    this.coordinator = this.buildCoordinator(context);
+    context.logger.log('Translation plugin config updated', { action: 'translation_config_changed' });
+    return Promise.resolve();
+  }
+
+  private buildCoordinator(context: PluginContext): TranslationCoordinator {
+    const cfg = context.config;
     const translator = new LibreTranslateClient({
       url: readString(cfg, 'libretranslateUrl', 'http://localhost:7001'),
       apiKey: readOptionalString(cfg, 'libretranslateApiKey'),
@@ -51,11 +65,7 @@ export class TranslationPlugin implements IPlugin {
       maxLength: readNumber(cfg, 'maxLength', 2000),
       denyReply: readBool(cfg, 'denyReply', false),
     };
-    this.coordinator = new TranslationCoordinator(translator, store, gateway, opts);
-
-    context.registerHook('message:received', ctx => this.onMessage(context, ctx as HookContext<IncomingMessage>));
-    context.logger.log('Translation plugin enabled', { action: 'translation_enabled' });
-    return Promise.resolve();
+    return new TranslationCoordinator(translator, store, gateway, opts);
   }
 
   onDisable(context: PluginContext): Promise<void> {
