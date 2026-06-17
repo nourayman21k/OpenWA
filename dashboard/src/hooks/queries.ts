@@ -17,7 +17,6 @@ export const queryKeys = {
   sessions: ['sessions'] as const,
   sessionStats: ['sessions', 'stats'] as const,
   sessionGroups: (sessionId: string) => ['sessions', sessionId, 'groups'] as const,
-  sessionChats: (sessionId: string) => ['sessions', sessionId, 'chats'] as const,
   webhooks: ['webhooks'] as const,
   templates: (sessionId: string) => ['sessions', sessionId, 'templates'] as const,
   apiKeys: ['apiKeys'] as const,
