@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.9] - 2026-06-17
+
+A reliability, security, and accessibility hardening release — no breaking changes. It tightens RBAC on
+write endpoints, patches the `ws`/`qs` advisories, makes the busy message path and graceful shutdown
+crash-resistant, fixes bulk-message terminal status, finally honors `LOG_LEVEL`, adds audit-log and
+webhook-job retention, and improves dashboard accessibility and load-error states.
+
+> ⚠️ **RBAC tightening (action may be required):** write endpoints for groups, contacts, labels, channels,
+> catalog, and status now require the `OPERATOR` role. If you used a `VIEWER` key for any of these writes,
+> switch it to `OPERATOR` (or `ADMIN`). Everything else is backward-compatible.
 
 ### Security
 
