@@ -28,6 +28,7 @@ plugins instead of in core (#265).
 - **`auto-reply` reference extension plugin**, first-party and **registered disabled by default** — enable
   it via `POST /plugins/auto-reply/enable` to exercise the capability layer end-to-end. (#294)
 - **Baileys engine (minimal slice)** — `ENGINE_TYPE=baileys` now selects a second, browser-free WhatsApp engine built on `@whiskeysockets/baileys` (WebSocket/Noise protocol, no Chromium). This first slice supports linking (QR + pairing code), sending and receiving **text**, recipient resolution, and typing presence; all other operations return HTTP 501 until later slices add a message store. Config: `BAILEYS_AUTH_DIR` (default `./data/baileys`). Proxy is not yet supported on this engine. (#299)
+- **Baileys engine — media/location/contact sends.** The Baileys engine (`ENGINE_TYPE=baileys`) can now send image/video/audio/document/sticker, location, and contact messages (slice 2a). URL media is fetched through the same SSRF-guarded path as the whatsapp-web.js engine (host guard + byte cap + timeout, no redirects). Reply/forward/react/delete remain unsupported (HTTP 501) until a later slice adds a message store. (#PR)
 
 ### Changed
 

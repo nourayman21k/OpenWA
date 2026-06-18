@@ -280,15 +280,28 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return this.sendContent(chatId, { sticker: data });
   }
 
+  async sendLocationMessage(chatId: string, location: LocationInput): Promise<MessageResult> {
+    this.ensureReady();
+    return this.sendContent(chatId, {
+      location: {
+        degreesLatitude: location.latitude,
+        degreesLongitude: location.longitude,
+        name: location.description,
+        address: location.address,
+      },
+    });
+  }
+
+  async sendContactMessage(chatId: string, contact: ContactCard): Promise<MessageResult> {
+    this.ensureReady();
+    return this.sendContent(chatId, {
+      contacts: { displayName: contact.name, contacts: [{ vcard: this.buildVCard(contact) }] },
+    });
+  }
+
   // ----- Gated: not supported by this minimal slice (no store) -----
   /* eslint-disable @typescript-eslint/no-unused-vars */
 
-  sendLocationMessage(_chatId: string, _location: LocationInput): Promise<MessageResult> {
-    return this.unsupported('sendLocationMessage');
-  }
-  sendContactMessage(_chatId: string, _contact: ContactCard): Promise<MessageResult> {
-    return this.unsupported('sendContactMessage');
-  }
   replyToMessage(_chatId: string, _quotedMsgId: string, _text: string): Promise<MessageResult> {
     return this.unsupported('replyToMessage');
   }
@@ -508,6 +521,18 @@ export class BaileysAdapter implements IWhatsAppEngine {
       return { data: fetched.data, mimetype: media.mimetype || fetched.mimetype };
     }
     return { data: Buffer.from(media.data, 'base64'), mimetype: media.mimetype };
+  }
+
+  /** Build a minimal WhatsApp-compatible vCard from a neutral contact card. */
+  private buildVCard(contact: ContactCard): string {
+    const waid = contact.number.replace(/\D/g, '');
+    return [
+      'BEGIN:VCARD',
+      'VERSION:3.0',
+      `FN:${contact.name}`,
+      `TEL;type=CELL;type=VOICE;waid=${waid}:${contact.number}`,
+      'END:VCARD',
+    ].join('\n');
   }
 
   /** Send a Baileys content object and shape the result like the other sends. */

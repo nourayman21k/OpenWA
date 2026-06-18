@@ -150,6 +150,48 @@ describe('BaileysAdapter capability gating', () => {
   });
 });
 
+describe('BaileysAdapter location + contact sends', () => {
+  beforeEach(() => {
+    fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    jest.clearAllMocks();
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'M2' }, messageTimestamp: 1700000006 });
+  });
+
+  const ready = async (): Promise<BaileysAdapter> => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('sendLocationMessage maps lat/long + optional name/address', async () => {
+    const adapter = await ready();
+    await adapter.sendLocationMessage('628111@s.whatsapp.net', {
+      latitude: 24.12,
+      longitude: 55.11,
+      description: 'Office',
+      address: '1 Main St',
+    });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      location: { degreesLatitude: 24.12, degreesLongitude: 55.11, name: 'Office', address: '1 Main St' },
+    });
+  });
+
+  it('sendContactMessage builds a vCard with the waid', async () => {
+    const adapter = await ready();
+    await adapter.sendContactMessage('628111@s.whatsapp.net', { name: 'John Doe', number: '+1 234-567' });
+    const [, call] = fakeSock.sendMessage.mock.calls[0] as [
+      string,
+      { contacts: { displayName: string; contacts: { vcard: string }[] } },
+    ];
+    expect(call.contacts.displayName).toBe('John Doe');
+    const vcard = call.contacts.contacts[0].vcard;
+    expect(vcard).toContain('FN:John Doe');
+    expect(vcard).toContain('waid=1234567:+1 234-567');
+    expect(vcard.startsWith('BEGIN:VCARD')).toBe(true);
+  });
+});
+
 describe('BaileysAdapter messaging', () => {
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };

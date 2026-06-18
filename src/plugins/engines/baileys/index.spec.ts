@@ -37,8 +37,14 @@ describe('BaileysPlugin.createEngine (opaque config)', () => {
     );
   });
 
-  it('advertises only the minimal supported feature set', () => {
-    expect(new BaileysPlugin().getFeatures()).toEqual(['text-messages', 'typing-indicator']);
+  it('advertises the slice-2a supported feature set', () => {
+    expect(new BaileysPlugin().getFeatures()).toEqual([
+      'text-messages',
+      'typing-indicator',
+      'media-messages',
+      'location-messages',
+      'contact-messages',
+    ]);
   });
 
   it('reports the baileys library name', () => {

@@ -47,8 +47,7 @@ export class BaileysPlugin implements IEnginePlugin {
   }
 
   getFeatures(): string[] {
-    // Minimal slice: text send/receive + typing presence. Everything else throws 501.
-    return ['text-messages', 'typing-indicator'];
+    return ['text-messages', 'typing-indicator', 'media-messages', 'location-messages', 'contact-messages'];
   }
 
   getEngineLibrary(): { name: string; version: string } {
