@@ -64,6 +64,7 @@ describe('Baileys engine boot (e2e)', () => {
       'message-forwarding',
       'message-reactions',
       'message-deletion',
+      'group-management',
     ]);
   });
 });

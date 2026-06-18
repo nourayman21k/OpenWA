@@ -61,6 +61,7 @@ export class BaileysPlugin implements IEnginePlugin {
       'message-forwarding',
       'message-reactions',
       'message-deletion',
+      'group-management',
     ];
   }
 
