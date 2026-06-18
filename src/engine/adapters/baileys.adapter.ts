@@ -1,4 +1,5 @@
 import * as path from 'path';
+import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { buildIncomingMessageFromBaileys, mapBaileysStatus } from './baileys-message-mapper';
 import { mapBaileysGroup, mapBaileysGroupInfo } from './baileys-group-mapper';
@@ -66,9 +67,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
   private callbacks: EngineEventCallbacks = {};
   private intentionalClose = false;
   /** Lazily loaded @whiskeysockets/baileys module (ESM-only; loaded on first connect, not at boot). */
-  private lib: any;
+  private lib?: typeof BaileysLib;
 
-  private async loadLib(): Promise<any> {
+  private async loadLib(): Promise<typeof BaileysLib> {
     return (this.lib ??= await import('@whiskeysockets/baileys'));
   }
 
@@ -94,18 +95,12 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   private async connect(): Promise<void> {
     this.setStatus(EngineStatus.INITIALIZING);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const b = await this.loadLib();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
     const { state, saveCreds } = await b.useMultiFileAuthState(this.authPath);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
     const { version } = await b.fetchLatestBaileysVersion();
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
     const sock = b.default({
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       auth: state,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       version,
       browser: BAILEYS_BROWSER,
       printQRInTerminal: false,
@@ -113,11 +108,10 @@ export class BaileysAdapter implements IWhatsAppEngine {
       // the type through a deep import path that TypeScript does not auto-unify here.
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       logger: createSilentLogger() as unknown as ILogger,
-    }) as WASocket;
+    });
     this.sock = sock;
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('creds.update', () => void saveCreds());
     sock.ev.on('connection.update', update => this.handleConnectionUpdate(update));
     sock.ev.on('messages.upsert', event => this.handleMessagesUpsert(event));
     sock.ev.on('messages.update', updates => this.handleMessagesUpdate(updates));
@@ -169,7 +163,6 @@ export class BaileysAdapter implements IWhatsAppEngine {
         return;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       if (statusCode === this.lib?.DisconnectReason.loggedOut) {
         // Credentials invalidated — terminal. Re-linking requires a fresh QR/pairing.
         this.setStatus(EngineStatus.DISCONNECTED);
@@ -617,7 +610,6 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   private mapMessage(msg: WAMessage): IncomingMessage {
     const content = msg.message ?? {};
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
     const contentType = this.lib?.getContentType(msg.message ?? undefined);
     const body = content.conversation ?? content.extendedTextMessage?.text ?? '';
     return buildIncomingMessageFromBaileys({
@@ -626,7 +618,6 @@ export class BaileysAdapter implements IWhatsAppEngine {
       fromMe: msg.key.fromMe === true,
       participant: msg.key.participant ?? undefined,
       body,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       contentType,
       isPtt: content.audioMessage?.ptt === true,
       timestamp: this.toUnixSeconds(msg.messageTimestamp),
