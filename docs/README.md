@@ -225,6 +225,6 @@ MIT License.
 
 **Start Reading: [01 - Project Overview](./01-project-overview.md)**
 
-_OpenWA Documentation · Last updated: 2026-02-05_
+_OpenWA Documentation · Last updated: 2026-06-18_
 
 </div>

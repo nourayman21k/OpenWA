@@ -140,7 +140,7 @@ Ability to run multiple WhatsApp sessions within a single OpenWA instance.
 Node.js framework for building server-side applications. The OpenWA backend is built with NestJS.
 
 ### Node.js
-JavaScript runtime used to run OpenWA. Supported version: Node.js 20 LTS.
+JavaScript runtime used to run OpenWA. Recommended version: Node.js 22 LTS.
 
 ## O
 

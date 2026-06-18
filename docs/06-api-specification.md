@@ -1843,7 +1843,7 @@ async function sendMessage(sessionId, chatId, text) {
 
 // Usage
 sendMessage('sess_abc123', '628123456789@c.us', 'Hello!')
-  .then(result => console.log('Sent:', result.data.messageId))
+  .then(result => console.log('Sent:', result.messageId))
   .catch(err => console.error('Error:', err.response?.data));
 ```
 
@@ -1885,7 +1885,7 @@ class OpenWA:
 # Usage
 client = OpenWA('http://localhost:2785/api', 'your-api-key')
 result = client.send_text('sess_abc123', '628123456789@c.us', 'Hello from Python!')
-print(f"Message ID: {result['data']['messageId']}")
+print(f"Message ID: {result['messageId']}")
 ```
 
 ### WebSocket Client Example (JavaScript)

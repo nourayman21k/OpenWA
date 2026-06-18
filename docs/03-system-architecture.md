@@ -747,41 +747,29 @@ flowchart LR
 
 ### API Response Structure
 
+Responses are the **raw handler payload** — there is no `{success, data, meta}` envelope.
+A controller that returns an object sends exactly that object; a list endpoint returns a bare array.
+Errors use the NestJS default shape.
+
 ```typescript
-// Success Response
+// Success Response — the resource itself
 {
-  "success": true,
-  "data": { ... },
-  "meta": {
-    "timestamp": "2025-02-02T10:00:00Z",
-    "requestId": "uuid"
-  }
+  "id": "abc",
+  "name": "my-session",
+  "status": "READY"
 }
 
-// Error Response
-{
-  "success": false,
-  "error": {
-    "code": "SESSION_NOT_FOUND",
-    "message": "Session with id 'xxx' not found",
-    "details": { ... }
-  },
-  "meta": {
-    "timestamp": "2025-02-02T10:00:00Z",
-    "requestId": "uuid"
-  }
-}
+// List Response — a bare array
+[
+  { "id": "abc", "name": "my-session", "status": "READY" },
+  { "id": "def", "name": "other-session", "status": "DISCONNECTED" }
+]
 
-// Paginated Response
+// Error Response — NestJS default shape
 {
-  "success": true,
-  "data": [ ... ],
-  "pagination": {
-    "page": 1,
-    "limit": 20,
-    "total": 100,
-    "totalPages": 5
-  }
+  "statusCode": 404,
+  "message": "Session with id 'xxx' not found",
+  "error": "Not Found"
 }
 ```
 

@@ -117,7 +117,7 @@ plugins/
   "types": "dist/index.d.ts",
 
   "openwa": {
-    "minVersion": "0.2.0",
+    "minVersion": "0.3.0",
     "maxVersion": "2.0.0"
   },
 
