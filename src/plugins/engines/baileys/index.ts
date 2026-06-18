@@ -51,7 +51,17 @@ export class BaileysPlugin implements IEnginePlugin {
   }
 
   getFeatures(): string[] {
-    return ['text-messages', 'typing-indicator', 'media-messages', 'location-messages', 'contact-messages'];
+    return [
+      'text-messages',
+      'typing-indicator',
+      'media-messages',
+      'location-messages',
+      'contact-messages',
+      'message-replies',
+      'message-forwarding',
+      'message-reactions',
+      'message-deletion',
+    ];
   }
 
   getEngineLibrary(): { name: string; version: string } {
