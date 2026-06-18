@@ -26,10 +26,9 @@ flowchart TB
             QM[Queue<br/>Manager]
         end
         
-        subgraph Engine["WhatsApp Engine"]
-            WW[whatsapp-web.js]
-            PP[Puppeteer]
-            CH[Chrome/Chromium]
+        subgraph Engine["WhatsApp Engine (pluggable)"]
+            WW[whatsapp-web.js<br/>Puppeteer/Chromium]
+            BY[Baileys<br/>WebSocket/No browser]
         end
         
         subgraph Storage["Storage Layer"]
@@ -671,14 +670,14 @@ flowchart TB
     subgraph Container["Docker Container"]
         subgraph Node["Node.js Runtime"]
             NEST[NestJS Application]
-            WW[whatsapp-web.js]
+            WW[whatsapp-web.js<br/>or Baileys]
         end
         
-        subgraph Browser["Headless Browser"]
+        subgraph Browser["Headless Browser (wwebjs only)"]
             CHROME[Chromium]
         end
         
-        Node --> Browser
+        Node -.->|ENGINE_TYPE=whatsapp-web.js| Browser
     end
     
     subgraph External["External Services"]
@@ -883,7 +882,7 @@ flowchart LR
 ## 3.12 Engine Abstraction Layer
 
 > [!IMPORTANT]
-> Engine abstraction is critical to mitigate **R001: WhatsApp Protocol Changes** in Risk Management. With an abstraction layer, we can easily switch to an alternative engine (e.g., Baileys) when needed.
+> Engine abstraction is critical to mitigate **R001: WhatsApp Protocol Changes** in Risk Management. OpenWA ships two production-ready engines selectable via `ENGINE_TYPE`: `whatsapp-web.js` (default, Chromium/Puppeteer-based) and `baileys` (browser-free, WebSocket/Noise protocol). With the abstraction layer, adding further engines requires no changes to application code.
 
 ### Strategy Pattern for Engine
 
@@ -1192,8 +1191,9 @@ ENGINE_TYPE=mock
 
 ```mermaid
 flowchart TB
-    subgraph Current["Current State"]
-        A[whatsapp-web.js\nPuppeteer-based]
+    subgraph Current["Available Engines"]
+        A[whatsapp-web.js\nPuppeteer-based\ndefault]
+        A2[Baileys\nWebSocket-based\nENGINE_TYPE=baileys]
     end
     
     subgraph Risk["Risk Detection"]

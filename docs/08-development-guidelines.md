@@ -814,7 +814,7 @@ API_KEY_MASTER=dev-master-key-change-in-production
 SESSION_DATA_PATH=./.wwebjs_auth
 MAX_SESSIONS=3
 
-# Engine
+# Engine (whatsapp-web.js = default, Chromium-based; baileys = browser-free WebSocket)
 ENGINE_TYPE=whatsapp-web.js
 PUPPETEER_HEADLESS=true
 
@@ -852,7 +852,7 @@ API_KEY_MASTER=your-secure-master-key
 SESSION_DATA_PATH=./.wwebjs_auth
 MAX_SESSIONS=10
 
-# Engine
+# Engine (whatsapp-web.js = default, Chromium-based; baileys = browser-free WebSocket)
 ENGINE_TYPE=whatsapp-web.js
 PUPPETEER_HEADLESS=true
 

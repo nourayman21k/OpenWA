@@ -438,13 +438,12 @@ curl -X POST http://localhost:2785/api/sessions/default/messages \
 **Interactive messages (Buttons / List): not supported**
 
 > ⚠️ **Buttons and List (interactive) messages are not available** through OpenWA's
-> whatsapp-web.js engine. WhatsApp stopped honoring the interactive-message payload
-> for unofficial web clients around 2021–2022 — the `Buttons` / `List` classes still
-> exist in the library, but messages built with them are **silently dropped and never
-> delivered** to recipients. OpenWA therefore does not expose `type: "buttons"` or
-> `type: "list"` endpoints; sending interactive messages requires the official
-> WhatsApp Business Cloud API. (The earlier examples here were speculative and never
-> implemented — see #158.)
+> unofficial-client engines (`whatsapp-web.js` default or `baileys`). WhatsApp stopped
+> honoring the interactive-message payload for unofficial clients around 2021–2022 —
+> messages of this type are **silently dropped and never delivered** to recipients.
+> OpenWA therefore does not expose `type: "buttons"` or `type: "list"` endpoints;
+> sending interactive messages requires the official WhatsApp Business Cloud API.
+> (The earlier examples here were speculative and never implemented — see #158.)
 
 **Response:**
 ```json

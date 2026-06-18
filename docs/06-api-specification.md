@@ -908,7 +908,7 @@ delivery-status tracking behave identically to a direct text send.
 > **Scope (issue #69):** Only **Option B** — server-side text templates with
 > variable substitution — is supported. Interactive templates (buttons, list
 > messages, WhatsApp Business HSM / approved message templates) are **Option A**
-> and are **not supported** on the whatsapp-web.js engine.
+> and are **not supported** on any of the current engines (`whatsapp-web.js` or `baileys`).
 
 ```http
 POST /api/sessions/:sessionId/messages/send-template
@@ -956,7 +956,7 @@ to a session and rendered with `{{placeholder}}` substitution by the
 an API key with at least the `operator` role.
 
 > Interactive button / list / HSM templates (**Option A**) are out of scope on
-> the whatsapp-web.js engine and are not provided.
+> all current engines and are not provided.
 
 #### Create Template
 
