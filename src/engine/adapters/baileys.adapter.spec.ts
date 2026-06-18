@@ -171,6 +171,7 @@ describe('BaileysAdapter capability gating', () => {
 describe('BaileysAdapter location + contact sends', () => {
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
     jest.clearAllMocks();
     fakeSock.sendMessage.mockResolvedValue({ key: { id: 'M2' }, messageTimestamp: 1700000006 });
   });
@@ -222,6 +223,7 @@ describe('BaileysAdapter location + contact sends', () => {
 describe('BaileysAdapter messaging', () => {
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
     jest.clearAllMocks();
   });
 
@@ -276,6 +278,7 @@ describe('BaileysAdapter inbound fan-out', () => {
 
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
     jest.clearAllMocks();
     baileys.getContentType.mockReturnValue('conversation');
   });
@@ -345,6 +348,7 @@ describe('BaileysAdapter inbound fan-out', () => {
 describe('BaileysAdapter media sends', () => {
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
     jest.clearAllMocks();
     fakeSock.sendMessage.mockResolvedValue({ key: { id: 'M1' }, messageTimestamp: 1700000005 });
   });
@@ -441,6 +445,7 @@ describe('BaileysAdapter media sends', () => {
 describe('BaileysAdapter store-backed ops', () => {
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
     jest.clearAllMocks();
     fakeSock.sendMessage.mockResolvedValue({
       key: { id: 'OUT', remoteJid: '628111@s.whatsapp.net', fromMe: true },
@@ -544,6 +549,7 @@ describe('BaileysAdapter group management', () => {
 
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
     jest.clearAllMocks();
   });
 
@@ -620,6 +626,7 @@ describe('BaileysAdapter group management', () => {
 describe('BaileysAdapter profile + block', () => {
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
     jest.clearAllMocks();
   });
 
@@ -651,6 +658,7 @@ describe('BaileysAdapter profile + block', () => {
 describe('BaileysAdapter contact + chat reads', () => {
   beforeEach(() => {
     fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    fakeSock.resetEmitter();
     jest.clearAllMocks();
   });
 

@@ -454,7 +454,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       this.ensureReady();
       return Promise.resolve(this.sessionStore.listContacts());
     } catch (e) {
-      return Promise.reject(e as Error);
+      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
     }
   }
 
@@ -463,7 +463,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       this.ensureReady();
       return Promise.resolve(this.sessionStore.findContact(contactId));
     } catch (e) {
-      return Promise.reject(e as Error);
+      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
     }
   }
 
@@ -472,7 +472,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       this.ensureReady();
       return Promise.resolve(this.sessionStore.resolvePhone(contactId));
     } catch (e) {
-      return Promise.reject(e as Error);
+      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
     }
   }
 
@@ -481,7 +481,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
       this.ensureReady();
       return Promise.resolve(this.sessionStore.listChats());
     } catch (e) {
-      return Promise.reject(e as Error);
+      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
     }
   }
 
