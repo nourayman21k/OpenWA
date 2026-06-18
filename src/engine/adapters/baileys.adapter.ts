@@ -449,40 +449,28 @@ export class BaileysAdapter implements IWhatsAppEngine {
 
   // ----- Contacts & chats -----
 
-  getContacts(): Promise<Contact[]> {
-    try {
-      this.ensureReady();
-      return Promise.resolve(this.sessionStore.listContacts());
-    } catch (e) {
-      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
-    }
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getContacts(): Promise<Contact[]> {
+    this.ensureReady();
+    return this.sessionStore.listContacts();
   }
 
-  getContactById(contactId: string): Promise<Contact | null> {
-    try {
-      this.ensureReady();
-      return Promise.resolve(this.sessionStore.findContact(contactId));
-    } catch (e) {
-      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
-    }
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getContactById(contactId: string): Promise<Contact | null> {
+    this.ensureReady();
+    return this.sessionStore.findContact(contactId);
   }
 
-  resolveContactPhone(contactId: string): Promise<string | null> {
-    try {
-      this.ensureReady();
-      return Promise.resolve(this.sessionStore.resolvePhone(contactId));
-    } catch (e) {
-      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
-    }
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async resolveContactPhone(contactId: string): Promise<string | null> {
+    this.ensureReady();
+    return this.sessionStore.resolvePhone(contactId);
   }
 
-  getChats(): Promise<ChatSummary[]> {
-    try {
-      this.ensureReady();
-      return Promise.resolve(this.sessionStore.listChats());
-    } catch (e) {
-      return Promise.reject(e instanceof Error ? e : new Error(String(e)));
-    }
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async getChats(): Promise<ChatSummary[]> {
+    this.ensureReady();
+    return this.sessionStore.listChats();
   }
 
   async sendSeen(chatId: string): Promise<boolean> {
