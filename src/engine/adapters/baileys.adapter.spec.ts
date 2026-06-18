@@ -50,6 +50,8 @@ jest.mock('@whiskeysockets/baileys', () => ({
   fetchLatestBaileysVersion: jest.fn().mockResolvedValue({ version: [2, 3000, 0] }),
   getContentType: jest.fn(() => 'conversation'),
   downloadMediaMessage: jest.fn().mockResolvedValue(Buffer.from('IMGDATA')),
+  // Identity passthrough by default; individual tests may override to simulate unwrapping.
+  normalizeMessageContent: jest.fn((c: unknown) => c),
   DisconnectReason: { loggedOut: 401, restartRequired: 515 },
   proto: {
     Message: {
@@ -391,6 +393,53 @@ describe('BaileysAdapter inbound fan-out', () => {
     expect(msg.media).toEqual({ mimetype: 'image/png', data: imgBuf.toString('base64') });
   });
 
+  it('inbound documentWithCaption: normalizeMessageContent unwraps wrapper, yields non-empty mimetype', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const baileys = jest.requireMock('@whiskeysockets/baileys') as {
+      getContentType: jest.Mock;
+      downloadMediaMessage: jest.Mock;
+      normalizeMessageContent: jest.Mock;
+    };
+    baileys.getContentType.mockReturnValue('documentWithCaptionMessage');
+    const docBuf = Buffer.from('PDFBYTES');
+    baileys.downloadMediaMessage.mockResolvedValue(docBuf);
+    // Simulate normalizeMessageContent unwrapping: returns the inner documentMessage.
+    baileys.normalizeMessageContent.mockReturnValue({
+      documentMessage: { mimetype: 'application/pdf', fileName: 'report.pdf', caption: 'Q1 report' },
+    });
+
+    const onMessage = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'DOC1' },
+          message: {
+            documentWithCaptionMessage: {
+              message: {
+                documentMessage: { mimetype: 'application/pdf', fileName: 'report.pdf', caption: 'Q1 report' },
+              },
+            },
+          },
+          messageTimestamp: 1700000030,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const msg = onMessage.mock.calls[0][0] as {
+      type: string;
+      media: { mimetype: string; filename?: string; data: string };
+    };
+    expect(msg.type).toBe('document');
+    expect(msg.media.mimetype).toBe('application/pdf');
+    expect(msg.media.filename).toBe('report.pdf');
+    expect(msg.media.data).toBe(docBuf.toString('base64'));
+  });
+
   it('inbound location: populates the location field with coordinates', async () => {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
     const baileys = jest.requireMock('@whiskeysockets/baileys') as { getContentType: jest.Mock };
@@ -491,6 +540,7 @@ describe('BaileysAdapter inbound fan-out', () => {
     await new Promise(r => setImmediate(r));
     expect(onMessage).not.toHaveBeenCalled();
     expect(onMessageRevoked).toHaveBeenCalledTimes(1);
+    expect(fakeStore.put).not.toHaveBeenCalled();
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const revoked = onMessageRevoked.mock.calls[0][0] as {
       id: string;
@@ -536,6 +586,7 @@ describe('BaileysAdapter inbound fan-out', () => {
     await new Promise(r => setImmediate(r));
     expect(onMessage).not.toHaveBeenCalled();
     expect(onMessageReaction).toHaveBeenCalledTimes(1);
+    expect(fakeStore.put).not.toHaveBeenCalled();
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const event = onMessageReaction.mock.calls[0][0] as {
       messageId: string;

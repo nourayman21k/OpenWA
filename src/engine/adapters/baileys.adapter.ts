@@ -589,58 +589,65 @@ export class BaileysAdapter implements IWhatsAppEngine {
   }
 
   private async processInboundMessage(msg: WAMessage): Promise<void> {
-    const b = await this.loadLib();
-    const remoteJid = msg.key.remoteJid!;
-    const contentType = b.getContentType(msg.message ?? undefined);
+    try {
+      const b = await this.loadLib();
+      const remoteJid = msg.key.remoteJid!;
+      const contentType = b.getContentType(msg.message ?? undefined);
 
-    // --- protocolMessage REVOKE: don't emit onMessage ---
-    if (contentType === 'protocolMessage') {
-      const pm = msg.message?.protocolMessage;
-      if (pm?.type === b.proto.Message.ProtocolMessage.Type.REVOKE) {
-        const from = msg.key.fromMe === true ? this.normalizedSelfJid() : remoteJid;
-        const to = msg.key.fromMe === true ? remoteJid : this.normalizedSelfJid();
-        const revoked: RevokedMessage = {
-          id: pm.key?.id ?? '',
-          chatId: remoteJid,
-          from,
-          to,
-          type: 'revoked',
-          body: '',
-          timestamp: this.toUnixSeconds(msg.messageTimestamp),
-        };
-        this.callbacks.onMessageRevoked?.(revoked);
+      // --- protocolMessage REVOKE: don't emit onMessage ---
+      if (contentType === 'protocolMessage') {
+        const pm = msg.message?.protocolMessage;
+        if (pm?.type === b.proto.Message.ProtocolMessage.Type.REVOKE) {
+          const from = msg.key.fromMe === true ? this.normalizedSelfJid() : remoteJid;
+          const to = msg.key.fromMe === true ? remoteJid : this.normalizedSelfJid();
+          const revoked: RevokedMessage = {
+            id: pm.key?.id ?? '',
+            chatId: remoteJid,
+            from,
+            to,
+            type: 'revoked',
+            body: '',
+            timestamp: this.toUnixSeconds(msg.messageTimestamp),
+          };
+          this.callbacks.onMessageRevoked?.(revoked);
+          return;
+        }
+        // Other protocol messages (ephemeral, history sync, etc.) — skip silently.
         return;
       }
-      // Other protocol messages (ephemeral, history sync, etc.) — skip silently.
-      return;
-    }
 
-    // --- reactionMessage: don't emit onMessage ---
-    if (contentType === 'reactionMessage') {
-      const rm = msg.message?.reactionMessage;
-      const event: ReactionEvent = {
-        messageId: rm?.key?.id ?? '',
-        chatId: remoteJid,
-        reaction: rm?.text ?? '',
-        senderId: msg.key.participant ?? remoteJid,
-      };
-      this.callbacks.onMessageReaction?.(event);
-      return;
-    }
+      // --- reactionMessage: don't emit onMessage ---
+      if (contentType === 'reactionMessage') {
+        const rm = msg.message?.reactionMessage;
+        const event: ReactionEvent = {
+          messageId: rm?.key?.id ?? '',
+          chatId: remoteJid,
+          reaction: rm?.text ?? '',
+          senderId: msg.key.participant ?? remoteJid,
+        };
+        this.callbacks.onMessageReaction?.(event);
+        return;
+      }
 
-    // --- Normal message: enrich + emit ---
-    const incoming = await this.mapMessage(msg, contentType);
-    if (msg.key.fromMe === true) {
-      this.callbacks.onMessageCreate?.(incoming);
-    } else {
-      this.callbacks.onMessage?.(incoming);
+      // --- Normal message: enrich + emit ---
+      const incoming = await this.mapMessage(msg, contentType);
+      if (msg.key.fromMe === true) {
+        this.callbacks.onMessageCreate?.(incoming);
+      } else {
+        this.callbacks.onMessage?.(incoming);
+      }
+      void this.config.messageStore?.put(this.config.sessionId, msg).catch(err =>
+        this.logger.warn('Failed to persist message to store', {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      this.sessionStore.recordMessage(msg);
+    } catch (err) {
+      this.logger.error(
+        `Unhandled error processing inbound message (id=${msg.key?.id ?? 'unknown'}); dropping`,
+        err instanceof Error ? err.message : String(err),
+      );
     }
-    void this.config.messageStore?.put(this.config.sessionId, msg).catch(err =>
-      this.logger.warn('Failed to persist message to store', {
-        error: err instanceof Error ? err.message : String(err),
-      }),
-    );
-    this.sessionStore.recordMessage(msg);
   }
 
   private handleMessagesUpdate(
@@ -703,14 +710,17 @@ export class BaileysAdapter implements IWhatsAppEngine {
             reuploadRequest: this.sock!.updateMediaMessage,
           },
         );
+        // normalizeMessageContent unwraps documentWithCaptionMessage / viewOnceMessage /
+        // ephemeralMessage wrappers so we always reach the inner media sub-message.
+        const normalizedContent = b.normalizeMessageContent(content) ?? content;
         const subMessage =
-          content.imageMessage ??
-          content.videoMessage ??
-          content.audioMessage ??
-          content.documentMessage ??
-          content.stickerMessage;
+          normalizedContent.imageMessage ??
+          normalizedContent.videoMessage ??
+          normalizedContent.audioMessage ??
+          normalizedContent.documentMessage ??
+          normalizedContent.stickerMessage;
         const mimetype = subMessage?.mimetype ?? '';
-        const filename = content.documentMessage?.fileName ?? undefined;
+        const filename = normalizedContent.documentMessage?.fileName ?? undefined;
         media = { mimetype, data: buf.toString('base64'), filename };
       } catch (err) {
         this.logger.debug('Failed to download inbound media; emitting message without media', {
@@ -736,9 +746,15 @@ export class BaileysAdapter implements IWhatsAppEngine {
         | undefined
     )?.contextInfo;
     if (contextInfo?.quotedMessage && contextInfo.stanzaId) {
-      const qm = contextInfo.quotedMessage as Record<string, { text?: string; caption?: string } | undefined>;
+      const qm = contextInfo.quotedMessage as {
+        conversation?: string | null;
+        extendedTextMessage?: { text?: string | null } | null;
+        imageMessage?: { caption?: string | null } | null;
+        videoMessage?: { caption?: string | null } | null;
+        documentMessage?: { caption?: string | null } | null;
+      };
       const qBody =
-        (qm.conversation as unknown as string) ??
+        qm.conversation ??
         qm.extendedTextMessage?.text ??
         qm.imageMessage?.caption ??
         qm.videoMessage?.caption ??
