@@ -614,3 +614,34 @@ describe('BaileysAdapter group management', () => {
     await expect(adapter.getGroups()).rejects.toBeInstanceOf(EngineNotReadyError);
   });
 });
+
+describe('BaileysAdapter profile + block', () => {
+  beforeEach(() => {
+    fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    jest.clearAllMocks();
+  });
+
+  const ready = async (): Promise<BaileysAdapter> => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('getProfilePicture returns the url, or null when none', async () => {
+    fakeSock.profilePictureUrl.mockResolvedValueOnce('https://pps/x.jpg');
+    const adapter = await ready();
+    expect(await adapter.getProfilePicture('628111@s.whatsapp.net')).toBe('https://pps/x.jpg');
+    expect(fakeSock.profilePictureUrl).toHaveBeenCalledWith('628111@s.whatsapp.net', 'image');
+    fakeSock.profilePictureUrl.mockRejectedValueOnce(new Error('no picture'));
+    expect(await adapter.getProfilePicture('628222@s.whatsapp.net')).toBeNull();
+  });
+
+  it('blockContact / unblockContact call updateBlockStatus', async () => {
+    const adapter = await ready();
+    await adapter.blockContact('628111@s.whatsapp.net');
+    expect(fakeSock.updateBlockStatus).toHaveBeenCalledWith('628111@s.whatsapp.net', 'block');
+    await adapter.unblockContact('628111@s.whatsapp.net');
+    expect(fakeSock.updateBlockStatus).toHaveBeenCalledWith('628111@s.whatsapp.net', 'unblock');
+  });
+});

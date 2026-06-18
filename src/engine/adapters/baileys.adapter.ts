@@ -406,6 +406,25 @@ export class BaileysAdapter implements IWhatsAppEngine {
     return (await this.sock!.groupRevokeInvite(groupId)) ?? '';
   }
 
+  async getProfilePicture(contactId: string): Promise<string | null> {
+    this.ensureReady();
+    try {
+      return (await this.sock!.profilePictureUrl(contactId, 'image')) ?? null;
+    } catch {
+      return null; // no picture set, or hidden by privacy
+    }
+  }
+
+  async blockContact(contactId: string): Promise<void> {
+    this.ensureReady();
+    await this.sock!.updateBlockStatus(contactId, 'block');
+  }
+
+  async unblockContact(contactId: string): Promise<void> {
+    this.ensureReady();
+    await this.sock!.updateBlockStatus(contactId, 'unblock');
+  }
+
   // ----- Gated: not supported by this minimal slice (no store) -----
   /* eslint-disable @typescript-eslint/no-unused-vars */
 
@@ -423,15 +442,6 @@ export class BaileysAdapter implements IWhatsAppEngine {
   }
   getChatHistory(_chatId: string, _limit?: number, _includeMedia?: boolean): Promise<IncomingMessage[]> {
     return this.unsupported('getChatHistory');
-  }
-  getProfilePicture(_contactId: string): Promise<string | null> {
-    return this.unsupported('getProfilePicture');
-  }
-  blockContact(_contactId: string): Promise<void> {
-    return this.unsupported('blockContact');
-  }
-  unblockContact(_contactId: string): Promise<void> {
-    return this.unsupported('unblockContact');
   }
   getLabels(): Promise<Label[]> {
     return this.unsupported('getLabels');
