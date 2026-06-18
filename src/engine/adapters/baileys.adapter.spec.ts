@@ -49,7 +49,15 @@ jest.mock('@whiskeysockets/baileys', () => ({
   useMultiFileAuthState: jest.fn().mockResolvedValue({ state: { creds: {}, keys: {} }, saveCreds }),
   fetchLatestBaileysVersion: jest.fn().mockResolvedValue({ version: [2, 3000, 0] }),
   getContentType: jest.fn(() => 'conversation'),
+  downloadMediaMessage: jest.fn().mockResolvedValue(Buffer.from('IMGDATA')),
   DisconnectReason: { loggedOut: 401, restartRequired: 515 },
+  proto: {
+    Message: {
+      ProtocolMessage: {
+        Type: { REVOKE: 0 },
+      },
+    },
+  },
 }));
 
 import { BaileysAdapter } from './baileys.adapter';
@@ -298,6 +306,7 @@ describe('BaileysAdapter inbound fan-out', () => {
         },
       ],
     });
+    await new Promise(r => setImmediate(r));
     expect(onMessage).toHaveBeenCalledTimes(1);
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const msg = onMessage.mock.calls[0][0] as { id: string; body: string; type: string; fromMe: boolean };
@@ -319,6 +328,7 @@ describe('BaileysAdapter inbound fan-out', () => {
         },
       ],
     });
+    await new Promise(r => setImmediate(r));
     expect(onMessageCreate).toHaveBeenCalledTimes(1);
     expect(onMessage).not.toHaveBeenCalled();
   });
@@ -342,6 +352,231 @@ describe('BaileysAdapter inbound fan-out', () => {
     await adapter.initialize({ onMessageAck });
     fakeSock.fire('messages.update', [{ key: { id: 'OUT1' }, update: { status: 3 } }]);
     expect(onMessageAck).toHaveBeenCalledWith('OUT1', 'delivered');
+  });
+
+  it('inbound image: downloads media and exposes base64 + caption as body', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const baileys = jest.requireMock('@whiskeysockets/baileys') as {
+      getContentType: jest.Mock;
+      downloadMediaMessage: jest.Mock;
+    };
+    baileys.getContentType.mockReturnValue('imageMessage');
+    const imgBuf = Buffer.from('PNGBYTES');
+    baileys.downloadMediaMessage.mockResolvedValue(imgBuf);
+
+    const onMessage = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'IMG1' },
+          message: { imageMessage: { mimetype: 'image/png', caption: 'look at this' } },
+          messageTimestamp: 1700000020,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const msg = onMessage.mock.calls[0][0] as {
+      id: string;
+      body: string;
+      type: string;
+      media: { mimetype: string; data: string };
+    };
+    expect(msg.type).toBe('image');
+    expect(msg.body).toBe('look at this');
+    expect(msg.media).toEqual({ mimetype: 'image/png', data: imgBuf.toString('base64') });
+  });
+
+  it('inbound location: populates the location field with coordinates', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const baileys = jest.requireMock('@whiskeysockets/baileys') as { getContentType: jest.Mock };
+    baileys.getContentType.mockReturnValue('locationMessage');
+
+    const onMessage = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'LOC1' },
+          message: {
+            locationMessage: {
+              degreesLatitude: 1.23,
+              degreesLongitude: 4.56,
+              name: 'Office',
+              address: '1 Main St',
+            },
+          },
+          messageTimestamp: 1700000021,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const msg = onMessage.mock.calls[0][0] as {
+      type: string;
+      location: { latitude: number; longitude: number; description?: string; address?: string };
+    };
+    expect(msg.type).toBe('location');
+    expect(msg.location).toEqual({ latitude: 1.23, longitude: 4.56, description: 'Office', address: '1 Main St' });
+  });
+
+  it('inbound quoted reply: populates quotedMessage', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const baileys = jest.requireMock('@whiskeysockets/baileys') as { getContentType: jest.Mock };
+    baileys.getContentType.mockReturnValue('extendedTextMessage');
+
+    const onMessage = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'REPLY1' },
+          message: {
+            extendedTextMessage: {
+              text: 'reply text',
+              contextInfo: {
+                stanzaId: 'QUOTED_ID',
+                quotedMessage: { conversation: 'original message' },
+              },
+            },
+          },
+          messageTimestamp: 1700000022,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const msg = onMessage.mock.calls[0][0] as {
+      body: string;
+      quotedMessage: { id: string; body: string };
+    };
+    expect(msg.body).toBe('reply text');
+    expect(msg.quotedMessage).toEqual({ id: 'QUOTED_ID', body: 'original message' });
+  });
+
+  it('REVOKE protocolMessage: fires onMessageRevoked and NOT onMessage', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const baileys = jest.requireMock('@whiskeysockets/baileys') as { getContentType: jest.Mock };
+    baileys.getContentType.mockReturnValue('protocolMessage');
+
+    const onMessage = jest.fn();
+    const onMessageRevoked = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage, onMessageRevoked });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'PROTO1' },
+          message: {
+            protocolMessage: {
+              key: { id: 'ORIGINAL_ID' },
+              type: 0, // REVOKE
+            },
+          },
+          messageTimestamp: 1700000023,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onMessageRevoked).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const revoked = onMessageRevoked.mock.calls[0][0] as {
+      id: string;
+      chatId: string;
+      type: string;
+      body: string;
+    };
+    expect(revoked.id).toBe('ORIGINAL_ID');
+    expect(revoked.chatId).toBe('628111@s.whatsapp.net');
+    expect(revoked.type).toBe('revoked');
+    expect(revoked.body).toBe('');
+  });
+
+  it('reactionMessage: fires onMessageReaction and NOT onMessage', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const baileys = jest.requireMock('@whiskeysockets/baileys') as { getContentType: jest.Mock };
+    baileys.getContentType.mockReturnValue('reactionMessage');
+
+    const onMessage = jest.fn();
+    const onMessageReaction = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage, onMessageReaction });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: {
+            remoteJid: '628111@s.whatsapp.net',
+            fromMe: false,
+            id: 'REACT1',
+            participant: '628111@s.whatsapp.net',
+          },
+          message: {
+            reactionMessage: {
+              key: { id: 'TARGET_MSG_ID' },
+              text: '👍',
+            },
+          },
+          messageTimestamp: 1700000024,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(onMessageReaction).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const event = onMessageReaction.mock.calls[0][0] as {
+      messageId: string;
+      chatId: string;
+      reaction: string;
+      senderId: string;
+    };
+    expect(event.messageId).toBe('TARGET_MSG_ID');
+    expect(event.chatId).toBe('628111@s.whatsapp.net');
+    expect(event.reaction).toBe('👍');
+    expect(event.senderId).toBe('628111@s.whatsapp.net');
+  });
+
+  it('media download failure: logs the error and emits the message without media (no throw)', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+    const baileys = jest.requireMock('@whiskeysockets/baileys') as {
+      getContentType: jest.Mock;
+      downloadMediaMessage: jest.Mock;
+    };
+    baileys.getContentType.mockReturnValue('imageMessage');
+    baileys.downloadMediaMessage.mockRejectedValue(new Error('download failed'));
+
+    const onMessage = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'IMGFAIL' },
+          message: { imageMessage: { mimetype: 'image/jpeg', caption: 'broken' } },
+          messageTimestamp: 1700000025,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    // message is still emitted, just without media
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const msg = onMessage.mock.calls[0][0] as { media?: unknown };
+    expect(msg.media).toBeUndefined();
   });
 });
 
@@ -520,6 +755,7 @@ describe('BaileysAdapter store-backed ops', () => {
         { key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'IN9' }, message: { conversation: 'hi' } },
       ],
     });
+    await new Promise(r => setImmediate(r));
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const inboundMatcher = expect.objectContaining({ key: expect.objectContaining({ id: 'IN9' }) });
     expect(fakeStore.put).toHaveBeenCalledWith('sess-1', inboundMatcher);
@@ -692,6 +928,7 @@ describe('BaileysAdapter contact + chat reads', () => {
         },
       ],
     });
+    await new Promise(r => setImmediate(r));
     const chats = await adapter.getChats();
     expect(chats[0]).toEqual({
       id: '628111@s.whatsapp.net',
@@ -744,6 +981,7 @@ describe('BaileysAdapter sendSeen + deleteChat', () => {
         },
       ],
     });
+    await new Promise(r => setImmediate(r)); // let async processInboundMessage complete
     return adapter;
   };
 

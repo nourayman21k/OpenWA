@@ -25,6 +25,8 @@ import {
   PaginatedProducts,
   Product,
   ProductQueryOptions,
+  ReactionEvent,
+  RevokedMessage,
   Status,
   StatusResult,
   ChatSummary,
@@ -582,19 +584,63 @@ export class BaileysAdapter implements IWhatsAppEngine {
       if (!msg.message || !msg.key?.remoteJid) {
         continue; // protocol/empty messages carry no neutral content
       }
-      const incoming = this.mapMessage(msg);
-      if (msg.key.fromMe === true) {
-        this.callbacks.onMessageCreate?.(incoming);
-      } else {
-        this.callbacks.onMessage?.(incoming);
-      }
-      void this.config.messageStore?.put(this.config.sessionId, msg).catch(err =>
-        this.logger.warn('Failed to persist message to store', {
-          error: err instanceof Error ? err.message : String(err),
-        }),
-      );
-      this.sessionStore.recordMessage(msg);
+      void this.processInboundMessage(msg);
     }
+  }
+
+  private async processInboundMessage(msg: WAMessage): Promise<void> {
+    const b = await this.loadLib();
+    const remoteJid = msg.key.remoteJid!;
+    const contentType = b.getContentType(msg.message ?? undefined);
+
+    // --- protocolMessage REVOKE: don't emit onMessage ---
+    if (contentType === 'protocolMessage') {
+      const pm = msg.message?.protocolMessage;
+      if (pm?.type === b.proto.Message.ProtocolMessage.Type.REVOKE) {
+        const from = msg.key.fromMe === true ? this.normalizedSelfJid() : remoteJid;
+        const to = msg.key.fromMe === true ? remoteJid : this.normalizedSelfJid();
+        const revoked: RevokedMessage = {
+          id: pm.key?.id ?? '',
+          chatId: remoteJid,
+          from,
+          to,
+          type: 'revoked',
+          body: '',
+          timestamp: this.toUnixSeconds(msg.messageTimestamp),
+        };
+        this.callbacks.onMessageRevoked?.(revoked);
+        return;
+      }
+      // Other protocol messages (ephemeral, history sync, etc.) — skip silently.
+      return;
+    }
+
+    // --- reactionMessage: don't emit onMessage ---
+    if (contentType === 'reactionMessage') {
+      const rm = msg.message?.reactionMessage;
+      const event: ReactionEvent = {
+        messageId: rm?.key?.id ?? '',
+        chatId: remoteJid,
+        reaction: rm?.text ?? '',
+        senderId: msg.key.participant ?? remoteJid,
+      };
+      this.callbacks.onMessageReaction?.(event);
+      return;
+    }
+
+    // --- Normal message: enrich + emit ---
+    const incoming = await this.mapMessage(msg, contentType);
+    if (msg.key.fromMe === true) {
+      this.callbacks.onMessageCreate?.(incoming);
+    } else {
+      this.callbacks.onMessage?.(incoming);
+    }
+    void this.config.messageStore?.put(this.config.sessionId, msg).catch(err =>
+      this.logger.warn('Failed to persist message to store', {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    this.sessionStore.recordMessage(msg);
   }
 
   private handleMessagesUpdate(
@@ -608,10 +654,99 @@ export class BaileysAdapter implements IWhatsAppEngine {
     }
   }
 
-  private mapMessage(msg: WAMessage): IncomingMessage {
+  private async mapMessage(msg: WAMessage, contentType: string | undefined): Promise<IncomingMessage> {
+    const b = await this.loadLib();
     const content = msg.message ?? {};
-    const contentType = this.lib?.getContentType(msg.message ?? undefined);
-    const body = content.conversation ?? content.extendedTextMessage?.text ?? '';
+
+    // Body: text first, then media caption as fallback.
+    const body =
+      content.conversation ??
+      content.extendedTextMessage?.text ??
+      content.imageMessage?.caption ??
+      content.videoMessage?.caption ??
+      content.documentMessage?.caption ??
+      '';
+
+    // --- location ---
+    // ILocationMessage has name/address; ILiveLocationMessage does not — use the static variant only.
+    let location: IncomingMessage['location'];
+    if (contentType === 'locationMessage' || contentType === 'liveLocationMessage') {
+      const lm = content.locationMessage ?? content.liveLocationMessage;
+      if (lm) {
+        const staticLm = content.locationMessage; // only ILocationMessage has name/address
+        location = {
+          latitude: lm.degreesLatitude ?? 0,
+          longitude: lm.degreesLongitude ?? 0,
+          description: staticLm?.name ?? undefined,
+          address: staticLm?.address ?? undefined,
+        };
+      }
+    }
+
+    // --- media (image / video / audio / document / sticker) ---
+    let media: IncomingMessage['media'];
+    const isMediaType =
+      contentType === 'imageMessage' ||
+      contentType === 'videoMessage' ||
+      contentType === 'audioMessage' ||
+      contentType === 'documentMessage' ||
+      contentType === 'documentWithCaptionMessage' ||
+      contentType === 'stickerMessage';
+    if (isMediaType) {
+      try {
+        const buf = await b.downloadMediaMessage(
+          msg,
+          'buffer',
+          {},
+          {
+            logger: createSilentLogger(),
+            reuploadRequest: this.sock!.updateMediaMessage,
+          },
+        );
+        const subMessage =
+          content.imageMessage ??
+          content.videoMessage ??
+          content.audioMessage ??
+          content.documentMessage ??
+          content.stickerMessage;
+        const mimetype = subMessage?.mimetype ?? '';
+        const filename = content.documentMessage?.fileName ?? undefined;
+        media = { mimetype, data: buf.toString('base64'), filename };
+      } catch (err) {
+        this.logger.debug('Failed to download inbound media; emitting message without media', {
+          error: err instanceof Error ? err.message : String(err),
+          msgId: msg.key.id,
+        });
+      }
+    }
+
+    // --- quoted message ---
+    let quotedMessage: IncomingMessage['quotedMessage'];
+    const subForContext =
+      content.extendedTextMessage ??
+      content.imageMessage ??
+      content.videoMessage ??
+      content.audioMessage ??
+      content.documentMessage ??
+      content.stickerMessage ??
+      content.locationMessage;
+    const contextInfo = (
+      subForContext as
+        | { contextInfo?: { stanzaId?: string | null; quotedMessage?: Record<string, unknown> | null } }
+        | undefined
+    )?.contextInfo;
+    if (contextInfo?.quotedMessage && contextInfo.stanzaId) {
+      const qm = contextInfo.quotedMessage as Record<string, { text?: string; caption?: string } | undefined>;
+      const qBody =
+        (qm.conversation as unknown as string) ??
+        qm.extendedTextMessage?.text ??
+        qm.imageMessage?.caption ??
+        qm.videoMessage?.caption ??
+        qm.documentMessage?.caption ??
+        '';
+      quotedMessage = { id: contextInfo.stanzaId, body: qBody };
+    }
+
     return buildIncomingMessageFromBaileys({
       id: msg.key.id ?? '',
       remoteJid: msg.key.remoteJid!,
@@ -623,6 +758,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
       timestamp: this.toUnixSeconds(msg.messageTimestamp),
       pushName: msg.pushName ?? undefined,
       selfJid: this.normalizedSelfJid(),
+      media,
+      location,
+      quotedMessage,
     });
   }
 
