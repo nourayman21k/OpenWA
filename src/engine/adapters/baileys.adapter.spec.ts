@@ -1,5 +1,9 @@
 import { EventEmitter } from 'events';
 
+jest.mock('../../common/media/load-remote-media', () => ({
+  loadRemoteMediaBuffer: jest.fn(),
+}));
+
 // A fake Baileys socket: an event emitter wearing the methods the adapter calls.
 class FakeSock extends EventEmitter {
   public ev = {
@@ -39,6 +43,7 @@ import { BaileysAdapter } from './baileys.adapter';
 import { EngineStatus, EngineEventCallbacks } from '../interfaces/whatsapp-engine.interface';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
+import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 
 const newAdapter = (): BaileysAdapter => new BaileysAdapter({ sessionId: 'sess-1', authDir: './data/baileys' });
 
@@ -142,9 +147,57 @@ describe('BaileysAdapter capability gating', () => {
     const adapter = newAdapter();
     await expect(adapter.getGroups()).rejects.toBeInstanceOf(EngineNotSupportedError);
     await expect(adapter.getChats()).rejects.toBeInstanceOf(EngineNotSupportedError);
-    await expect(adapter.sendImageMessage('x', { mimetype: 'image/png', data: 'AAA' })).rejects.toBeInstanceOf(
-      EngineNotSupportedError,
-    );
+  });
+});
+
+describe('BaileysAdapter location + contact sends', () => {
+  beforeEach(() => {
+    fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    jest.clearAllMocks();
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'M2' }, messageTimestamp: 1700000006 });
+  });
+
+  const ready = async (): Promise<BaileysAdapter> => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('sendLocationMessage maps lat/long + optional name/address', async () => {
+    const adapter = await ready();
+    await adapter.sendLocationMessage('628111@s.whatsapp.net', {
+      latitude: 24.12,
+      longitude: 55.11,
+      description: 'Office',
+      address: '1 Main St',
+    });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      location: { degreesLatitude: 24.12, degreesLongitude: 55.11, name: 'Office', address: '1 Main St' },
+    });
+  });
+
+  it('sendContactMessage builds a vCard with the waid', async () => {
+    const adapter = await ready();
+    await adapter.sendContactMessage('628111@s.whatsapp.net', { name: 'John Doe', number: '+1 234-567' });
+    const [, call] = fakeSock.sendMessage.mock.calls[0] as [
+      string,
+      { contacts: { displayName: string; contacts: { vcard: string }[] } },
+    ];
+    expect(call.contacts.displayName).toBe('John Doe');
+    const vcard = call.contacts.contacts[0].vcard;
+    expect(vcard).toContain('FN:John Doe');
+    expect(vcard).toContain('waid=1234567:+1 234-567');
+    expect(vcard.startsWith('BEGIN:VCARD')).toBe(true);
+  });
+
+  it('sanitizes CRLF in a contact name to prevent vCard line-injection', async () => {
+    const adapter = await ready();
+    await adapter.sendContactMessage('628111@s.whatsapp.net', { name: 'Eve\nEMAIL:evil@x.com', number: '123' });
+    const [, call] = fakeSock.sendMessage.mock.calls[0] as [string, { contacts: { contacts: { vcard: string }[] } }];
+    const vcard = call.contacts.contacts[0].vcard;
+    expect(vcard).not.toMatch(/\nEMAIL:evil@x\.com/);
+    expect(vcard).toContain('FN:Eve EMAIL:evil@x.com');
   });
 });
 
@@ -268,5 +321,101 @@ describe('BaileysAdapter inbound fan-out', () => {
     await adapter.initialize({ onMessageAck });
     fakeSock.fire('messages.update', [{ key: { id: 'OUT1' }, update: { status: 3 } }]);
     expect(onMessageAck).toHaveBeenCalledWith('OUT1', 'delivered');
+  });
+});
+
+describe('BaileysAdapter media sends', () => {
+  beforeEach(() => {
+    fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    jest.clearAllMocks();
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'M1' }, messageTimestamp: 1700000005 });
+  });
+
+  const ready = async (): Promise<BaileysAdapter> => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('sendImageMessage sends a Buffer image with caption + mimetype', async () => {
+    const adapter = await ready();
+    const buf = Buffer.from([1, 2, 3]);
+    const res = await adapter.sendImageMessage('628111@s.whatsapp.net', {
+      mimetype: 'image/png',
+      data: buf,
+      caption: 'hi',
+    });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      image: buf,
+      caption: 'hi',
+      mimetype: 'image/png',
+    });
+    expect(res).toEqual({ id: 'M1', timestamp: 1700000005 });
+  });
+
+  it('resolves a base64 data string to a Buffer (no URL fetch)', async () => {
+    const adapter = await ready();
+    await adapter.sendDocumentMessage('628111@s.whatsapp.net', {
+      mimetype: 'application/pdf',
+      data: Buffer.from('PDFDATA').toString('base64'),
+      filename: 'doc.pdf',
+    });
+    expect(loadRemoteMediaBuffer).not.toHaveBeenCalled();
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      document: Buffer.from('PDFDATA'),
+      mimetype: 'application/pdf',
+      fileName: 'doc.pdf',
+    });
+  });
+
+  it('fetches a URL data string through the SSRF-guarded loader', async () => {
+    (loadRemoteMediaBuffer as jest.Mock).mockResolvedValue({ data: Buffer.from([9]), mimetype: 'video/mp4' });
+    const adapter = await ready();
+    await adapter.sendVideoMessage('628111@s.whatsapp.net', { mimetype: '', data: 'https://cdn.example/v.mp4' });
+    expect(loadRemoteMediaBuffer).toHaveBeenCalledWith('https://cdn.example/v.mp4');
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      video: Buffer.from([9]),
+      caption: undefined,
+      mimetype: 'video/mp4',
+    });
+  });
+
+  it('sendAudioMessage sets ptt:false', async () => {
+    const adapter = await ready();
+    await adapter.sendAudioMessage('628111@s.whatsapp.net', { mimetype: 'audio/mp4', data: Buffer.from([1]) });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      audio: Buffer.from([1]),
+      mimetype: 'audio/mp4',
+      ptt: false,
+    });
+  });
+
+  it('sendStickerMessage sends the sticker buffer', async () => {
+    const adapter = await ready();
+    await adapter.sendStickerMessage('628111@s.whatsapp.net', { mimetype: 'image/webp', data: Buffer.from([7]) });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', { sticker: Buffer.from([7]) });
+  });
+
+  it('uses the caller-declared mimetype over the fetched content-type for a URL', async () => {
+    (loadRemoteMediaBuffer as jest.Mock).mockResolvedValue({
+      data: Buffer.from([1]),
+      mimetype: 'application/octet-stream',
+    });
+    const adapter = await ready();
+    await adapter.sendImageMessage('628111@s.whatsapp.net', { mimetype: 'image/png', data: 'https://cdn.example/x' });
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('628111@s.whatsapp.net', {
+      image: Buffer.from([1]),
+      caption: undefined,
+      mimetype: 'image/png',
+    });
+  });
+
+  it('media sends reject with EngineNotReadyError before the connection is open', async () => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    await expect(
+      adapter.sendImageMessage('x', { mimetype: 'image/png', data: Buffer.from([1]) }),
+    ).rejects.toBeInstanceOf(EngineNotReadyError);
   });
 });
