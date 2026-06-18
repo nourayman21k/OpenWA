@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { AddBaileysStoredMessages1781000000000 } from './1781000000000-AddBaileysStoredMessages';
+import { AddBaileysStoredMessages1781000000000 } from '../1781000000000-AddBaileysStoredMessages';
 
 describe('AddBaileysStoredMessages migration', () => {
   let ds: DataSource;
