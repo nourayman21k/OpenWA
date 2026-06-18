@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — single-port dashboard: the API now serves the bundled dashboard SPA.** In production the
+  NestJS API serves the built dashboard from its own port (default `2785`) via `@nestjs/serve-static`, so
+  there is no separate dashboard container and the UI is available by default wherever the API runs. `/api`
+  and `/socket.io` are excluded so they keep returning real API/WebSocket responses. Opt out with
+  `SERVE_DASHBOARD=false`. Dev is unchanged: `npm run dev` still runs the Vite dev server on `:2886` (HMR)
+  proxying to the API. Split-origin hosting (dashboard on a separate origin/CDN) still works: build with
+  `VITE_API_URL=<api-origin>` and host `dashboard/dist` anywhere. (#275)
+- The API's Content-Security-Policy now allows `https://fonts.googleapis.com` (`style-src`) and
+  `https://fonts.gstatic.com` (`font-src`) so the dashboard's webfonts load now that it is served under the
+  API's CSP. (#275)
+
+### Added
+
+- `npm run build:all` (build API + dashboard) and `npm run prod` (build then serve) for running the
+  production build directly without Docker. (#275)
+
+### Migration
+
+- The dashboard moved from `:2886` (separate nginx container) to the API port `:2785`. Update bookmarks,
+  monitoring, and any external reverse-proxy config accordingly. (#275)
+- The `with-dashboard` compose profile and the `DASHBOARD_ENABLED` env var are removed (the dashboard ships
+  with the API; ignored if still set). (#275)
+
 ## [0.3.0] - 2026-06-18
 
 Engine pluggability and plugin extensibility. OpenWA can now run on a second, browser-free WhatsApp engine
