@@ -40,6 +40,7 @@ import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error'
 import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { createLogger } from '../../common/services/logger.service';
 import { BaileysAdapterConfig, BaileysLogger } from '../types/baileys.types';
+import { BaileysSessionStore } from './baileys-session-store';
 
 /** Linked-device identity shown in WhatsApp (Settings → Linked Devices). */
 const BAILEYS_BROWSER: [string, string, string] = ['OpenWA', 'Chrome', '120.0.0'];
@@ -62,6 +63,7 @@ function createSilentLogger(): BaileysLogger {
 export class BaileysAdapter implements IWhatsAppEngine {
   private readonly logger = createLogger('BaileysAdapter');
   private readonly authPath: string;
+  private readonly sessionStore = new BaileysSessionStore();
   private sock: WASocket | null = null;
   private status: EngineStatus = EngineStatus.DISCONNECTED;
   private qrCode: string | null = null;
@@ -112,6 +114,18 @@ export class BaileysAdapter implements IWhatsAppEngine {
     sock.ev.on('connection.update', update => this.handleConnectionUpdate(update));
     sock.ev.on('messages.upsert', event => this.handleMessagesUpsert(event));
     sock.ev.on('messages.update', updates => this.handleMessagesUpdate(updates));
+    sock.ev.on('contacts.upsert', contacts => this.sessionStore.upsertContacts(contacts));
+    sock.ev.on('contacts.update', updates => this.sessionStore.upsertContacts(updates));
+    sock.ev.on('chats.upsert', chats => this.sessionStore.upsertChats(chats));
+    sock.ev.on('chats.update', updates => this.sessionStore.upsertChats(updates));
+    sock.ev.on('messaging-history.set', history => {
+      this.sessionStore.upsertContacts(history.contacts);
+      this.sessionStore.upsertChats(history.chats);
+      // lidPnMappings is not in the installed @whiskeysockets/baileys@6.7.23 type definition but
+      // is present at runtime in later protocol versions; cast to access it safely.
+      const lidPnMappings = (history as unknown as { lidPnMappings?: { lid: string; pn: string }[] }).lidPnMappings;
+      this.sessionStore.addLidMappings(lidPnMappings ?? []);
+    });
   }
 
   private handleConnectionUpdate(update: {
@@ -433,20 +447,49 @@ export class BaileysAdapter implements IWhatsAppEngine {
     await this.sock!.updateBlockStatus(contactId, 'unblock');
   }
 
+  // ----- Contacts & chats -----
+
+  getContacts(): Promise<Contact[]> {
+    try {
+      this.ensureReady();
+      return Promise.resolve(this.sessionStore.listContacts());
+    } catch (e) {
+      return Promise.reject(e as Error);
+    }
+  }
+
+  getContactById(contactId: string): Promise<Contact | null> {
+    try {
+      this.ensureReady();
+      return Promise.resolve(this.sessionStore.findContact(contactId));
+    } catch (e) {
+      return Promise.reject(e as Error);
+    }
+  }
+
+  resolveContactPhone(contactId: string): Promise<string | null> {
+    try {
+      this.ensureReady();
+      return Promise.resolve(this.sessionStore.resolvePhone(contactId));
+    } catch (e) {
+      return Promise.reject(e as Error);
+    }
+  }
+
+  getChats(): Promise<ChatSummary[]> {
+    try {
+      this.ensureReady();
+      return Promise.resolve(this.sessionStore.listChats());
+    } catch (e) {
+      return Promise.reject(e as Error);
+    }
+  }
+
   // ----- Gated: not supported by this minimal slice (no store) -----
   /* eslint-disable @typescript-eslint/no-unused-vars */
 
   getMessageReactions(_chatId: string, _messageId: string): Promise<MessageReaction[]> {
     return this.unsupported('getMessageReactions');
-  }
-  getContacts(): Promise<Contact[]> {
-    return this.unsupported('getContacts');
-  }
-  getContactById(_contactId: string): Promise<Contact | null> {
-    return this.unsupported('getContactById');
-  }
-  resolveContactPhone(_contactId: string): Promise<string | null> {
-    return this.unsupported('resolveContactPhone');
   }
   getChatHistory(_chatId: string, _limit?: number, _includeMedia?: boolean): Promise<IncomingMessage[]> {
     return this.unsupported('getChatHistory');
@@ -514,9 +557,6 @@ export class BaileysAdapter implements IWhatsAppEngine {
   sendCatalog(_chatId: string, _body?: string): Promise<MessageResult> {
     return this.unsupported('sendCatalog');
   }
-  getChats(): Promise<ChatSummary[]> {
-    return this.unsupported('getChats');
-  }
   sendSeen(_chatId: string): Promise<boolean> {
     return this.unsupported('sendSeen');
   }
@@ -547,6 +587,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
           error: err instanceof Error ? err.message : String(err),
         }),
       );
+      this.sessionStore.recordMessage(msg);
     }
   }
 

@@ -30,6 +30,8 @@ class FakeSock extends EventEmitter {
   public groupRevokeInvite = jest.fn();
   public profilePictureUrl = jest.fn();
   public updateBlockStatus = jest.fn().mockResolvedValue(undefined);
+  public readMessages = jest.fn().mockResolvedValue(undefined);
+  public chatModify = jest.fn().mockResolvedValue(undefined);
   fire(event: string, arg: unknown): void {
     this.emitter.emit(event, arg);
   }
@@ -160,9 +162,9 @@ describe('BaileysAdapter lifecycle & status', () => {
 });
 
 describe('BaileysAdapter capability gating', () => {
-  it('throws EngineNotSupportedError for store-backed methods (e.g. getChats)', async () => {
+  it('throws EngineNotSupportedError for still-gated methods (e.g. sendSeen)', async () => {
     const adapter = newAdapter();
-    await expect(adapter.getChats()).rejects.toBeInstanceOf(EngineNotSupportedError);
+    await expect(adapter.sendSeen('628111@s.whatsapp.net')).rejects.toBeInstanceOf(EngineNotSupportedError);
   });
 });
 
@@ -643,5 +645,72 @@ describe('BaileysAdapter profile + block', () => {
     expect(fakeSock.updateBlockStatus).toHaveBeenCalledWith('628111@s.whatsapp.net', 'block');
     await adapter.unblockContact('628111@s.whatsapp.net');
     expect(fakeSock.updateBlockStatus).toHaveBeenCalledWith('628111@s.whatsapp.net', 'unblock');
+  });
+});
+
+describe('BaileysAdapter contact + chat reads', () => {
+  beforeEach(() => {
+    fakeSock.user = { id: '628999:1@s.whatsapp.net', name: 'Me' };
+    jest.clearAllMocks();
+  });
+
+  const ready = async (): Promise<BaileysAdapter> => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    fakeSock.fire('connection.update', { connection: 'open' });
+    return adapter;
+  };
+
+  it('populates contacts from contacts.upsert and reads them', async () => {
+    const adapter = await ready();
+    fakeSock.fire('contacts.upsert', [{ id: '628111@s.whatsapp.net', notify: 'Al' }]);
+    const contacts = await adapter.getContacts();
+    expect(contacts).toHaveLength(1);
+    expect(contacts[0]).toMatchObject({ id: '628111@s.whatsapp.net', pushName: 'Al', number: '628111' });
+    expect((await adapter.getContactById('628111@s.whatsapp.net'))?.number).toBe('628111');
+    expect(await adapter.getContactById('x@s.whatsapp.net')).toBeNull();
+  });
+
+  it('populates chats + last message and reads getChats', async () => {
+    const adapter = await ready();
+    fakeSock.fire('chats.upsert', [{ id: '628111@s.whatsapp.net', name: 'Alice', unreadCount: 1 }]);
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'M1' },
+          message: { conversation: 'hi' },
+          messageTimestamp: 1700000010,
+        },
+      ],
+    });
+    const chats = await adapter.getChats();
+    expect(chats[0]).toEqual({
+      id: '628111@s.whatsapp.net',
+      name: 'Alice',
+      isGroup: false,
+      unreadCount: 1,
+      timestamp: 1700000010,
+      lastMessage: 'hi',
+    });
+  });
+
+  it('populates from messaging-history.set incl. lid mappings', async () => {
+    const adapter = await ready();
+    fakeSock.fire('messaging-history.set', {
+      contacts: [{ id: '628222@s.whatsapp.net', name: 'Bob' }],
+      chats: [{ id: '628222@s.whatsapp.net', name: 'Bob' }],
+      messages: [],
+      lidPnMappings: [{ lid: '111@lid', pn: '628999@s.whatsapp.net' }],
+    });
+    expect(await adapter.getContacts()).toHaveLength(1);
+    expect(await adapter.resolveContactPhone('111@lid')).toBe('628999');
+    expect(await adapter.resolveContactPhone('628222@s.whatsapp.net')).toBe('628222');
+  });
+
+  it('contact/chat reads reject with EngineNotReadyError before connect', async () => {
+    const adapter = newAdapter();
+    await adapter.initialize({});
+    await expect(adapter.getContacts()).rejects.toBeInstanceOf(EngineNotReadyError);
   });
 });
