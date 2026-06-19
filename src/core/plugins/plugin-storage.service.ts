@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { createLogger } from '../../common/services/logger.service';
+import { isPathWithin } from '../../common/utils/path-safety';
 import { PluginStatus, PluginStorage, PluginRegistryEntry } from './plugin.interfaces';
 
 @Injectable()
@@ -39,11 +40,18 @@ export class PluginStorageService {
     try {
       const dir = path.dirname(this.registryPath);
       if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       }
 
       const entries = Array.from(this.registry.values());
-      fs.writeFileSync(this.registryPath, JSON.stringify(entries, null, 2));
+      // Owner-only: plugin config can hold secrets (e.g. an API key). writeFileSync's mode only
+      // applies on CREATE, so chmod an already-existing, looser file too (best-effort).
+      fs.writeFileSync(this.registryPath, JSON.stringify(entries, null, 2), { mode: 0o600 });
+      try {
+        fs.chmodSync(this.registryPath, 0o600);
+      } catch {
+        /* best-effort hardening */
+      }
     } catch (error) {
       this.logger.error('Failed to save plugin registry', String(error), {
         action: 'registry_save_failed',
@@ -124,9 +132,19 @@ export class PluginStorageService {
 
     const logger = this.logger;
 
+    // Containment: a plugin storage key must resolve INSIDE its own sandbox dir. path.join normalizes
+    // `..`, so a key like `../../x` would otherwise escape and clobber another plugin's data, the
+    // registry, or .env.generated. Reject anything that escapes; JID chars (`:`,`@`,`.`,`-`) are fine.
+    const resolveKeyPath = (key: string): string | null =>
+      isPathWithin(pluginDataDir, `${key}.json`) ? path.join(pluginDataDir, `${key}.json`) : null;
+
     return {
       get: <T = unknown>(key: string): Promise<T | null> => {
-        const filePath = path.join(pluginDataDir, `${key}.json`);
+        const filePath = resolveKeyPath(key);
+        if (!filePath) {
+          logger.warn(`Refusing to read plugin data with an unsafe key: ${pluginId}/${key}`);
+          return Promise.resolve(null);
+        }
         try {
           if (fs.existsSync(filePath)) {
             const content = fs.readFileSync(filePath, 'utf-8');
@@ -139,7 +157,10 @@ export class PluginStorageService {
       },
 
       set: <T = unknown>(key: string, value: T): Promise<void> => {
-        const filePath = path.join(pluginDataDir, `${key}.json`);
+        const filePath = resolveKeyPath(key);
+        if (!filePath) {
+          return Promise.reject(new Error(`Unsafe plugin storage key (escapes sandbox): ${key}`));
+        }
         try {
           fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
           return Promise.resolve();
@@ -150,7 +171,10 @@ export class PluginStorageService {
       },
 
       delete: (key: string): Promise<void> => {
-        const filePath = path.join(pluginDataDir, `${key}.json`);
+        const filePath = resolveKeyPath(key);
+        if (!filePath) {
+          return Promise.reject(new Error(`Unsafe plugin storage key (escapes sandbox): ${key}`));
+        }
         try {
           if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);

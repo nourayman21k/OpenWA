@@ -4,6 +4,12 @@ jest.mock('dns/promises', () => ({
   lookup: jest.fn().mockResolvedValue([{ address: '93.184.216.34', family: 4 }]),
 }));
 
+// Webhook delivery goes through undici's fetch (via the SSRF-pinning helper); mock it, not global fetch.
+jest.mock('undici', () => {
+  const actual = jest.requireActual<typeof import('undici')>('undici');
+  return { __esModule: true, ...actual, fetch: jest.fn() };
+});
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bullmq';
@@ -11,6 +17,7 @@ import { Repository } from 'typeorm';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
+import { fetch as undiciFetch } from 'undici';
 import { WebhookService, WebhookPayload } from './webhook.service';
 import { Webhook } from './entities/webhook.entity';
 import { HookManager } from '../../core/hooks';
@@ -56,7 +63,8 @@ describe('WebhookService', () => {
       get: jest.fn().mockImplementation(<T>(key: string, def?: T): T | boolean | number => {
         if (key === 'queue.enabled') return false;
         if (key === 'webhook.retryDelay') return 100;
-        if (key === 'webhook.timeout') return 10000;
+        // Distinct from the hardcoded 10000 fallback so a regression to a literal timeout is caught.
+        if (key === 'webhook.timeout') return 25000;
         return def as T;
       }),
     };
@@ -232,10 +240,9 @@ describe('WebhookService', () => {
   // ── dispatch (direct mode — queue disabled) ───────────────────────
 
   describe('dispatch (direct mode)', () => {
-    const mockFetch = jest.fn();
+    const mockFetch = undiciFetch as jest.Mock;
 
     beforeEach(() => {
-      global.fetch = mockFetch as typeof global.fetch;
       mockFetch.mockResolvedValue({ ok: true, status: 200 });
     });
 
@@ -272,12 +279,28 @@ describe('WebhookService', () => {
         },
       });
 
+      const timeoutSpy = jest.spyOn(AbortSignal, 'timeout');
       await service.dispatch('sess-1', 'message.received', { from: '628123456789@c.us' });
 
       expect(mockFetch).toHaveBeenCalledWith(
         'https://example.com/webhook',
         expect.objectContaining({ method: 'POST' }),
       );
+      // Direct delivery path honors the configured WEBHOOK_TIMEOUT, not a literal 10s.
+      expect(timeoutSpy).toHaveBeenCalledWith(25000);
+      timeoutSpy.mockRestore();
+    });
+
+    it('test() probes the receiver using the configured WEBHOOK_TIMEOUT', async () => {
+      const webhook = createMockWebhook({ events: ['message.received'] });
+      (repository.findOne as jest.Mock).mockResolvedValue(webhook);
+      const timeoutSpy = jest.spyOn(AbortSignal, 'timeout');
+
+      await service.test('sess-1', webhook.id);
+
+      expect(mockFetch).toHaveBeenCalled();
+      expect(timeoutSpy).toHaveBeenCalledWith(25000);
+      timeoutSpy.mockRestore();
     });
 
     it('should NOT dispatch to webhooks that do not match the event', async () => {
@@ -340,11 +363,11 @@ describe('WebhookService', () => {
       (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
 
       const captured: Record<string, string> = {};
-      const mockFetch = jest.fn().mockImplementation((_url: string, opts: RequestInit) => {
+      const mockFetch = undiciFetch as jest.Mock;
+      mockFetch.mockImplementation((_url: string, opts: RequestInit) => {
         Object.assign(captured, opts.headers as Record<string, string>);
         return Promise.resolve({ ok: true, status: 200 });
       });
-      global.fetch = mockFetch as typeof global.fetch;
 
       const payload: WebhookPayload = {
         event: 'message.received',
@@ -371,11 +394,10 @@ describe('WebhookService', () => {
   // ── redirect refusal ─────────────────────────────────────────
 
   describe('dispatch — redirect refusal', () => {
-    const mockFetch = jest.fn();
+    const mockFetch = undiciFetch as jest.Mock;
     const origProtect = process.env.WEBHOOK_SSRF_PROTECT;
 
     beforeEach(() => {
-      global.fetch = mockFetch as typeof global.fetch;
       process.env.WEBHOOK_SSRF_PROTECT = 'true';
     });
 
@@ -433,11 +455,11 @@ describe('WebhookService', () => {
       (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
 
       const capturedHeaders: Record<string, string> = {};
-      const mockFetch = jest.fn().mockImplementation((_url: string, opts: RequestInit) => {
+      const mockFetch = undiciFetch as jest.Mock;
+      mockFetch.mockImplementation((_url: string, opts: RequestInit) => {
         Object.assign(capturedHeaders, opts.headers as Record<string, string>);
         return Promise.resolve({ ok: true, status: 200 });
       });
-      global.fetch = mockFetch as typeof global.fetch;
 
       const sigPayload: WebhookPayload = {
         event: 'message.received',

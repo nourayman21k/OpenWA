@@ -20,6 +20,7 @@ import {
   ChatState,
   DeliveryStatus,
   IncomingMessage,
+  ReactionEvent,
 } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { EventsGateway } from '../events/events.gateway';
@@ -45,6 +46,12 @@ const RECONNECT_BASE_DELAY_MIN_MS = 1000;
 const RECONNECT_BASE_DELAY_MAX_MS = 300_000;
 const RECONNECT_MAX_ATTEMPTS_CAP = 20;
 const RECONNECT_DELAY_CAP_MS = 3_600_000;
+/**
+ * Delay before retrying an ack UPDATE that matched 0 rows. A fast delivered/read ack can arrive before
+ * the send's 2nd save (which writes waMessageId) has committed, so the first UPDATE finds no row. One
+ * retry after this delay closes that race; the forward-only transition guard keeps it idempotent.
+ */
+export const ACK_RECONCILE_DELAY_MS = 750;
 
 const clampNumber = (n: number, min: number, max: number): number => Math.min(Math.max(n, min), max);
 
@@ -91,6 +98,11 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   // Reconnection state per session
   private reconnectStates: Map<string, ReconnectState> = new Map();
 
+  // Last session.status value dispatched to webhooks per session. Some engines signal one transition
+  // via BOTH onStateChanged and a dedicated callback (onQRCode/onDisconnected), so this guards the
+  // webhook POST against firing the same status twice. Cleared on delete().
+  private readonly lastDispatchedStatus = new Map<string, SessionStatus>();
+
   // Sessions currently being stopped/deleted. An in-flight executeReconnect awaits
   // engine init, so a stop/delete during that window could re-register an engine AFTER
   // teardown (orphan). stop()/delete() add the id here; executeReconnect checks it after its
@@ -101,6 +113,11 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   // in start() so a near-simultaneous second start() can't pass the engines.has() check during the
   // awaited hook and orphan an engine the lifecycle could never destroy.
   private initializingSessions: Set<string> = new Set();
+
+  // Serializes the read-modify-write of a message's reactions map per `${sessionId}:${waMessageId}`,
+  // so two concurrent reaction events on the same message don't clobber each other (both read the
+  // same snapshot, both full-row save, last writer wins). Entries are deleted once their chain drains.
+  private reactionChains: Map<string, Promise<void>> = new Map();
 
   constructor(
     @InjectRepository(Session, 'data')
@@ -209,7 +226,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     sessionId: string,
     engine: IWhatsAppEngine,
     teardown: (e: IWhatsAppEngine) => Promise<void>,
-    label: 'destroy' | 'disconnect',
+    label: 'destroy' | 'disconnect' | 'force-destroy',
   ): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -345,6 +362,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     } finally {
       // Always clear the teardown mark so a later recreate/start with this id isn't suppressed.
       this.stoppingSessions.delete(id);
+      this.lastDispatchedStatus.delete(id);
     }
   }
 
@@ -411,11 +429,13 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     await this.updateStatus(id, SessionStatus.INITIALIZING);
 
     await engine.initialize({
-      onQRCode: (): void => {
+      onQRCode: (qr: string): void => {
         this.logger.log('QR code generated', {
           sessionId: id,
           action: 'qr_generated',
         });
+
+        void this.webhookService.dispatch(id, 'session.qr', { sessionId: id, qr });
 
         // Execute hook for QR event
         void this.hookManager.execute(
@@ -436,6 +456,8 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
           pushName,
           action: 'ready',
         });
+
+        void this.webhookService.dispatch(id, 'session.authenticated', { sessionId: id, phone, pushName });
 
         // Execute hook for ready event
         void this.hookManager.execute(
@@ -591,25 +613,44 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         // fire-and-forget writes race-safe at the DB level.
         const messageStatus = deliveryStatusToMessageStatus(status);
         if (messageStatus) {
-          void this.messageRepository
-            // Scope by sessionId: waMessageId is unique per account/chat, not global —
-            // an ack on one session must never advance a same-id row in another session.
-            .update(
-              { sessionId: id, waMessageId: messageId, status: In(ackStatusTransitionFrom(messageStatus)) },
-              { status: messageStatus },
-            )
-            .then(result => {
-              // affected:0 — the row was not advanced: either the send's 2nd save (which sets
-              // waMessageId) hasn't committed yet, or the status is already at/above the target.
-              if (result.affected === 0) {
-                this.logger.debug(`Message ack ${messageId}: no status row advanced to ${messageStatus} (${status})`, {
-                  sessionId: id,
-                  messageId,
-                  status,
-                  action: 'message_ack_noop',
-                });
-              }
+          // Scope by sessionId: waMessageId is unique per account/chat, not global — an ack on one
+          // session must never advance a same-id row in another session. The In() guard makes the
+          // UPDATE forward-only (a late/out-of-order ack can't downgrade) and idempotent on retry.
+          const advanceAck = (): Promise<number> =>
+            this.messageRepository
+              .update(
+                { sessionId: id, waMessageId: messageId, status: In(ackStatusTransitionFrom(messageStatus)) },
+                { status: messageStatus },
+              )
+              .then(result => result.affected ?? 0);
+
+          const logNoop = (): void =>
+            this.logger.debug(`Message ack ${messageId}: no status row advanced to ${messageStatus} (${status})`, {
+              sessionId: id,
+              messageId,
+              status,
+              action: 'message_ack_noop',
             });
+
+          const onAckError = (err: unknown): void =>
+            this.logger.error(`Failed to advance ack for ${messageId}`, String(err));
+
+          void advanceAck()
+            .then(affected => {
+              if (affected > 0) return;
+              // affected:0 — most likely the send's 2nd save (which writes waMessageId) hasn't committed
+              // yet, so the row isn't matchable. Each ack is one-shot (WhatsApp won't necessarily resend),
+              // so retry ONCE after a short delay to close that race rather than leave it stuck at SENT.
+              const timer = setTimeout(() => {
+                void advanceAck()
+                  .then(retried => {
+                    if (retried === 0) logNoop();
+                  })
+                  .catch(onAckError);
+              }, ACK_RECONCILE_DELAY_MS);
+              timer.unref?.();
+            })
+            .catch(onAckError);
         }
 
         // Push the live delivery/read tick to the dashboard over the websocket (neutral status).
@@ -666,28 +707,18 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
           action: 'message_reaction_received',
         });
 
-        void this.messageRepository
-          .findOne({ where: { sessionId: id, waMessageId: event.messageId } })
-          .then(async msg => {
-            if (!msg) return;
-            const metadata = msg.metadata || {};
-            const reactions = (metadata.reactions as Record<string, string>) || {};
-
-            if (!event.reaction) {
-              delete reactions[event.senderId];
-            } else {
-              reactions[event.senderId] = event.reaction;
-            }
-
-            metadata.reactions = reactions;
-            msg.metadata = metadata;
-            await this.messageRepository.save(msg);
-
-            this.eventsGateway.emitMessageReaction(id, { ...event, reactions });
-          })
-          .catch(err => {
-            this.logger.error(`Failed to update message reaction: ${event.messageId}`, String(err));
-          });
+        // Serialize per message so two concurrent reactions don't read the same snapshot and clobber
+        // each other on the full-row save. A prior chain's failure must not block later reactions.
+        const key = `${id}:${event.messageId}`;
+        const prior = this.reactionChains.get(key) ?? Promise.resolve();
+        const next = prior.catch(() => undefined).then(() => this.applyReaction(id, event));
+        this.reactionChains.set(key, next);
+        void next.finally(() => {
+          // Clean up only if no newer reaction chained after us, so the map can't leak per message.
+          if (this.reactionChains.get(key) === next) {
+            this.reactionChains.delete(key);
+          }
+        });
       },
       onDisconnected: (reason: string): void => {
         this.logger.warn(`Session disconnected: ${reason}`, {
@@ -695,6 +726,8 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
           reason,
           action: 'disconnected',
         });
+
+        void this.webhookService.dispatch(id, 'session.disconnected', { sessionId: id, reason });
 
         // Execute hook for disconnected event
         void this.hookManager.execute(
@@ -749,6 +782,33 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         void this.updateStatus(id, SessionStatus.FAILED);
       },
     });
+  }
+
+  /**
+   * Apply one reaction event to the stored message's reactions map (read-modify-write of the JSON
+   * column). Invoked through the per-message serialization chain in onMessageReaction, so concurrent
+   * reactions on the same message run sequentially and don't clobber each other.
+   */
+  private async applyReaction(id: string, event: ReactionEvent): Promise<void> {
+    try {
+      const msg = await this.messageRepository.findOne({ where: { sessionId: id, waMessageId: event.messageId } });
+      if (!msg) return;
+
+      const metadata = msg.metadata || {};
+      const reactions = (metadata.reactions as Record<string, string>) || {};
+      if (!event.reaction) {
+        delete reactions[event.senderId];
+      } else {
+        reactions[event.senderId] = event.reaction;
+      }
+      metadata.reactions = reactions;
+      msg.metadata = metadata;
+      await this.messageRepository.save(msg);
+
+      this.eventsGateway.emitMessageReaction(id, { ...event, reactions });
+    } catch (err) {
+      this.logger.error(`Failed to update message reaction: ${event.messageId}`, String(err));
+    }
   }
 
   private scheduleReconnect(id: string, session: Session): void {
@@ -857,6 +917,33 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     this.logger.log(`Session stopped: ${session.name}`, {
       sessionId: id,
       action: 'stop',
+    });
+    await this.updateStatus(id, SessionStatus.DISCONNECTED);
+    return this.findOne(id);
+  }
+
+  /**
+   * Force-recover a stuck session: SIGKILL its engine's own resources (a wedged Chromium for the
+   * whatsapp-web.js engine) and tear it down, even when a normal stop()/delete() can't because the
+   * engine is hung. Mirrors stop()'s lifecycle (stop-mark + cancel-reconnect + bounded, isolated
+   * teardown + Map reconciliation) but uses the engine's forceDestroy().
+   */
+  async forceKill(id: string): Promise<Session> {
+    const session = await this.findOne(id);
+
+    // Mark as tearing down BEFORE cleanup so an in-flight reconnect can't resurrect it.
+    this.stoppingSessions.add(id);
+    this.cancelReconnect(id);
+
+    const engine = this.engines.get(id);
+    if (engine) {
+      await this.teardownEngineSafely(id, engine, e => e.forceDestroy(), 'force-destroy');
+      this.engines.delete(id);
+    }
+
+    this.logger.warn(`Session force-killed: ${session.name}`, {
+      sessionId: id,
+      action: 'force_kill',
     });
     await this.updateStatus(id, SessionStatus.DISCONNECTED);
     return this.findOne(id);
@@ -1005,6 +1092,13 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     });
     // Emit real-time event to connected WebSocket clients
     this.eventsGateway.emitSessionStatus(id, status);
+    // Mirror the status change to subscribed webhooks. Some engines signal one transition via both
+    // onStateChanged AND a dedicated callback (onQRCode/onDisconnected), which would POST the same
+    // status twice — dispatch only when the status actually changed from the last one we sent.
+    if (this.lastDispatchedStatus.get(id) !== status) {
+      this.lastDispatchedStatus.set(id, status);
+      void this.webhookService.dispatch(id, 'session.status', { sessionId: id, status });
+    }
   }
 
   /**

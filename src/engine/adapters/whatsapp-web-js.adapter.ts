@@ -34,8 +34,9 @@ import {
 } from '../interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
+import { EngineNotSupportedError } from '../../common/errors/engine-not-supported.error';
 import { MessageNotFoundError } from '../../common/errors/message-not-found.error';
-import { assertSafeFetchUrl } from '../../common/security/ssrf-guard';
+import { loadRemoteMediaBuffer } from '../../common/media/load-remote-media';
 import {
   GroupChat,
   GroupMetadataRaw,
@@ -46,16 +47,6 @@ import {
 } from '../types/whatsapp-web-js.types';
 import { buildIncomingMessageBase } from './message-mapper';
 import { capInboundMedia } from './inbound-media-cap';
-
-/** Default cap on a server-side media download: 50 MiB (overridable via MEDIA_DOWNLOAD_MAX_BYTES). */
-const DEFAULT_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
-/** Default timeout for a server-side media download: 30s (overridable via MEDIA_DOWNLOAD_TIMEOUT_MS). */
-const DEFAULT_MEDIA_TIMEOUT_MS = 30_000;
-
-function positiveIntFromEnv(name: string, fallback: number): number {
-  const parsed = Number.parseInt(process.env[name] ?? '', 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-}
 
 /**
  * Map a whatsapp-web.js MessageAck integer to the neutral DeliveryStatus.
@@ -71,6 +62,19 @@ export function wwebjsAckToDeliveryStatus(ack: number): DeliveryStatus {
 }
 
 /**
+ * Whether a per-session proxy URL parses to a supported scheme — defense-in-depth for a stored proxy
+ * that bypassed DTO validation (e.g. loaded from the DB on restart). The host is NOT SSRF-blocked: a
+ * per-session proxy is operator-chosen egress, and a loopback proxy sidecar is a legitimate setup.
+ */
+export function isSupportedProxyUrl(url: string): boolean {
+  try {
+    return ['http:', 'https:', 'socks4:', 'socks5:'].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fetch remote media for sending, with an SSRF host guard, a byte cap, and a timeout.
  * The guard runs BEFORE any network call, so an internal/reserved URL throws `SsrfBlockedError`
  * and no outbound socket is opened. The byte cap (node-fetch `size`) and `AbortSignal` timeout
@@ -78,16 +82,13 @@ export function wwebjsAckToDeliveryStatus(ack: number): DeliveryStatus {
  * existing MIME-detection behavior.
  */
 export async function loadRemoteMedia(url: string): Promise<MessageMedia> {
-  await assertSafeFetchUrl(url);
-  return MessageMedia.fromUrl(url, {
-    reqOptions: {
-      size: positiveIntFromEnv('MEDIA_DOWNLOAD_MAX_BYTES', DEFAULT_MEDIA_MAX_BYTES),
-      signal: AbortSignal.timeout(positiveIntFromEnv('MEDIA_DOWNLOAD_TIMEOUT_MS', DEFAULT_MEDIA_TIMEOUT_MS)),
-      // Never follow redirects: the SSRF guard only validated the original host, so a
-      // followed 3xx could reach an internal target. node-fetch rejects on redirect.
-      redirect: 'error',
-    },
-  });
+  // Fetch through the SSRF-pinned path: it validates the host, pins the connection to the vetted IP
+  // (so a DNS rebind can't redirect it to an internal target between check and connect), caps bytes,
+  // and refuses redirects. We then build the MessageMedia from the returned bytes — NOT via
+  // MessageMedia.fromUrl, whose bundled node-fetch performs its own unpinned DNS re-resolution.
+  const { data, mimetype } = await loadRemoteMediaBuffer(url);
+  const filename = new URL(url).pathname.split('/').pop() || undefined;
+  return new MessageMedia(mimetype || 'application/octet-stream', data.toString('base64'), filename);
 }
 
 export interface WhatsAppWebJsConfig {
@@ -179,12 +180,17 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         '--disable-gpu',
       ];
 
-      // Add proxy configuration if provided
+      // Add proxy configuration if provided — but only when the URL parses to a supported scheme, so
+      // a malformed/stored proxy value can't break the Chromium launch or smuggle a non-proxy scheme.
       if (this.config.proxy) {
-        puppeteerArgs.push(`--proxy-server=${this.config.proxy.url}`);
-        this.logger.log(
-          `Using proxy: ${this.config.proxy.type}://${this.config.proxy.url.replace(/:[^:@]*@/, ':***@')}`,
-        );
+        if (isSupportedProxyUrl(this.config.proxy.url)) {
+          puppeteerArgs.push(`--proxy-server=${this.config.proxy.url}`);
+          this.logger.log(
+            `Using proxy: ${this.config.proxy.type}://${this.config.proxy.url.replace(/:[^:@]*@/, ':***@')}`,
+          );
+        } else {
+          this.logger.warn(`Ignoring invalid proxy URL for session ${this.config.sessionId}`);
+        }
       }
 
       // Pin the WA-Web version when configured (fixes the 1.34.x "stuck at authenticating"
@@ -441,6 +447,36 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       this.client = null;
       this.setStatus(EngineStatus.DISCONNECTED);
     }
+  }
+
+  /**
+   * Force-recover a wedged session: SIGKILL THIS client's own Chromium process directly (not a
+   * process-wide `pkill`, which would also kill other sessions), then best-effort `client.destroy()`
+   * for the rest of the cleanup. Both steps are wrapped so a missing process handle or a hung destroy
+   * can't prevent the engine from being torn down and the status reset.
+   */
+  async forceDestroy(): Promise<void> {
+    const client = this.client;
+    if (!client) return;
+
+    try {
+      // pupBrowser is the Puppeteer Browser; .process() is the Chromium ChildProcess (null if already gone).
+      const proc = (
+        client as unknown as { pupBrowser?: { process?: () => { kill?: (sig: string) => void } | null } }
+      ).pupBrowser?.process?.();
+      proc?.kill?.('SIGKILL');
+    } catch (err) {
+      this.logger.warn('forceDestroy: failed to kill the browser process', { error: String(err) });
+    }
+
+    try {
+      await client.destroy();
+    } catch (err) {
+      this.logger.warn('forceDestroy: client.destroy() failed after the kill (continuing)', { error: String(err) });
+    }
+
+    this.client = null;
+    this.setStatus(EngineStatus.DISCONNECTED);
   }
 
   getStatus(): EngineStatus {
@@ -700,11 +736,31 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     }
 
     await msgToForward.forward(toChatId);
-    // forward() returns void, so we generate a result based on original message
-    return {
-      id: `fwd_${messageId}`,
-      timestamp: Date.now(),
-    };
+
+    // whatsapp-web.js's forward() returns void, so BEST-EFFORT recover the REAL id of the sent copy by
+    // reading it back from the destination chat (the most recent outgoing message). The delivery-ack
+    // matcher keys on this id, so a synthetic one would leave the forward stuck at SENT; Baileys already
+    // returns the real id. The forward already succeeded here, so recovery must NEVER fail the operation.
+    // When the copy can't be identified we return an explicit-unknown id (empty): message.service then
+    // leaves the row's waMessageId unset so no ack can mis-match it — unlike a synthetic or source id,
+    // which could cross-drive another row's delivery status. Concurrent forwards to the same chat may
+    // mis-identify the copy — acceptable for delivery-status accuracy.
+    try {
+      const destChat = await this.client!.getChatById(toChatId);
+      const sentByMe = (await destChat?.fetchMessages({ limit: 5, fromMe: true })) ?? [];
+      let sent: (typeof sentByMe)[number] | undefined;
+      for (const m of sentByMe) {
+        if (!sent || m.timestamp > sent.timestamp) {
+          sent = m;
+        }
+      }
+      if (sent) {
+        return { id: sent.id._serialized, timestamp: sent.timestamp };
+      }
+    } catch (error) {
+      this.logger.warn(`Forward succeeded but recovering the sent message id failed: ${String(error)}`);
+    }
+    return { id: '', timestamp: Math.floor(Date.now() / 1000) };
   }
 
   // ============= Phase 3: Group Management =============
@@ -1129,22 +1185,22 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     // whatsapp-web.js doesn't have native status posting
     // This would require using the underlying WhatsApp Web API directly
-    throw new Error('postTextStatus not yet implemented in whatsapp-web.js adapter');
+    throw new EngineNotSupportedError('postTextStatus');
   }
 
   async postImageStatus(_media: MediaInput, _caption?: string): Promise<StatusResult> {
     this.ensureReady();
-    throw new Error('postImageStatus not yet implemented in whatsapp-web.js adapter');
+    throw new EngineNotSupportedError('postImageStatus');
   }
 
   async postVideoStatus(_media: MediaInput, _caption?: string): Promise<StatusResult> {
     this.ensureReady();
-    throw new Error('postVideoStatus not yet implemented in whatsapp-web.js adapter');
+    throw new EngineNotSupportedError('postVideoStatus');
   }
 
   async deleteStatus(_statusId: string): Promise<void> {
     this.ensureReady();
-    throw new Error('deleteStatus not yet implemented in whatsapp-web.js adapter');
+    throw new EngineNotSupportedError('deleteStatus');
   }
 
   // ========== Catalog (Phase 3) ==========
@@ -1173,12 +1229,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   async sendProduct(_chatId: string, _productId: string, _body?: string): Promise<MessageResult> {
     this.ensureReady();
-    throw new Error('sendProduct not yet implemented in whatsapp-web.js adapter');
+    throw new EngineNotSupportedError('sendProduct');
   }
 
   async sendCatalog(_chatId: string, _body?: string): Promise<MessageResult> {
     this.ensureReady();
-    throw new Error('sendCatalog not yet implemented in whatsapp-web.js adapter');
+    throw new EngineNotSupportedError('sendCatalog');
   }
 
   /* eslint-enable @typescript-eslint/require-await, @typescript-eslint/no-unused-vars */
