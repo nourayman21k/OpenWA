@@ -53,7 +53,10 @@
     "light": "లైట్",
     "dark": "డార్క్",
     "system": "సిస్టమ్",
-    "label": "థీమ్: {{value}}"
+    "label": "థీమ్: {{value}}",
+    "appearance": "రూపం",
+    "mode": "మోడ్",
+    "palette": "రంగుల పలక"
   },
   "nav": {
     "dashboard": "డ్యాష్‌బోర్డ్",

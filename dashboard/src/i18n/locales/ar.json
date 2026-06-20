@@ -53,7 +53,10 @@
     "light": "فاتح",
     "dark": "داكن",
     "system": "النظام",
-    "label": "المظهر: {{value}}"
+    "label": "المظهر: {{value}}",
+    "appearance": "المظهر",
+    "mode": "الوضع",
+    "palette": "لوحة الألوان"
   },
   "nav": {
     "dashboard": "لوحة التحكم",

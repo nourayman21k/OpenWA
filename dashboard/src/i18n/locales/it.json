@@ -53,7 +53,10 @@
     "light": "Chiaro",
     "dark": "Scuro",
     "system": "Sistema",
-    "label": "Tema: {{value}}"
+    "label": "Tema: {{value}}",
+    "appearance": "Aspetto",
+    "mode": "Modalità",
+    "palette": "Tavolozza"
   },
   "nav": {
     "dashboard": "Dashboard",

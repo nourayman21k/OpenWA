@@ -1242,16 +1242,35 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   async getChats(): Promise<ChatSummary[]> {
     this.ensureReady();
     const chats = await this.client!.getChats();
+    const summaries: ChatSummary[] = [];
+    let skipped = 0;
+
     // Map the raw whatsapp-web.js chat objects to the library-agnostic ChatSummary
-    // shape so that no library types leak past the engine boundary.
-    return chats.map(chat => ({
-      id: chat.id._serialized,
-      name: chat.name,
-      isGroup: chat.isGroup,
-      unreadCount: chat.unreadCount,
-      timestamp: chat.timestamp,
-      lastMessage: chat.lastMessage?.body || undefined,
-    }));
+    // shape so that no library types leak past the engine boundary. Some WA system
+    // or channel-like entries can lack the normal serialized id; skip those instead
+    // of failing the whole dashboard chats request.
+    for (const chat of chats) {
+      const id = chat.id?._serialized;
+      if (!id) {
+        skipped++;
+        continue;
+      }
+
+      summaries.push({
+        id,
+        name: chat.name || id,
+        isGroup: Boolean(chat.isGroup),
+        unreadCount: chat.unreadCount || 0,
+        timestamp: chat.timestamp || 0,
+        lastMessage: chat.lastMessage?.body || undefined,
+      });
+    }
+
+    if (skipped > 0) {
+      this.logger.warn(`Skipped ${skipped} chat(s) without a serialized id`);
+    }
+
+    return summaries;
   }
 
   async sendSeen(chatId: string): Promise<boolean> {
