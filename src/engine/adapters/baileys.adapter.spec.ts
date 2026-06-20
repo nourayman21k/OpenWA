@@ -565,6 +565,73 @@ describe('BaileysAdapter inbound fan-out', () => {
     expect(msg).toMatchObject({ id: 'IN1', body: 'hi there', type: 'text', fromMe: false });
   });
 
+  it('canonicalizes an inbound message JID from @s.whatsapp.net to @c.us', async () => {
+    const onMessage = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '628111@s.whatsapp.net', fromMe: false, id: 'IN_C' },
+          message: { conversation: 'hi' },
+          messageTimestamp: 1700000002,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const msg = onMessage.mock.calls[0][0] as { from: string; to: string; chatId: string };
+    expect(msg.from).toBe('628111@c.us');
+    expect(msg.to).toBe('628999@c.us'); // self (fakeSock.user is 628999)
+    expect(msg.chatId).toBe('628111@c.us');
+  });
+
+  it('resolves an @lid sender to <phone>@c.us using a history-sync lid->pn mapping', async () => {
+    const onMessage = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage });
+    // History sync supplies the lid -> phone mapping the resolver needs.
+    fakeSock.fire('messaging-history.set', { lidPnMappings: [{ lid: '111@lid', pn: '628111@s.whatsapp.net' }] });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '111@lid', fromMe: false, id: 'IN_LID' },
+          message: { conversation: 'hi from lid' },
+          messageTimestamp: 1700000005,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const msg = onMessage.mock.calls[0][0] as { from: string; isLidSender?: boolean };
+    expect(msg.from).toBe('628111@c.us'); // lid resolved to phone, neutral dialect
+    expect(msg.isLidSender).toBe(true); // still flagged: the raw sender was a lid
+  });
+
+  it('keeps an unresolved @lid sender as @lid end-to-end (no mapping known)', async () => {
+    const onMessage = jest.fn();
+    const adapter = newAdapter();
+    await adapter.initialize({ onMessage });
+    fakeSock.fire('messages.upsert', {
+      type: 'notify',
+      messages: [
+        {
+          key: { remoteJid: '111@lid', fromMe: false, id: 'IN_LID_RAW' },
+          message: { conversation: 'hi from unknown lid' },
+          messageTimestamp: 1700000005,
+        },
+      ],
+    });
+    await new Promise(r => setImmediate(r));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const msg = onMessage.mock.calls[0][0] as { from: string; chatId: string; isLidSender?: boolean };
+    expect(msg.from).toBe('111@lid'); // unresolved: kept as a privacy id, not faked into a phone
+    expect(msg.chatId).toBe('111@lid');
+    expect(msg.isLidSender).toBe(true);
+  });
+
   it('routes a fromMe message to onMessageCreate (outgoing), not onMessage', async () => {
     const onMessage = jest.fn();
     const onMessageCreate = jest.fn();
@@ -799,7 +866,7 @@ describe('BaileysAdapter inbound fan-out', () => {
       body: string;
     };
     expect(revoked.id).toBe('ORIGINAL_ID');
-    expect(revoked.chatId).toBe('628111@s.whatsapp.net');
+    expect(revoked.chatId).toBe('628111@c.us'); // canonicalized to the neutral dialect
     expect(revoked.type).toBe('revoked');
     expect(revoked.body).toBe('');
   });
@@ -845,9 +912,9 @@ describe('BaileysAdapter inbound fan-out', () => {
       senderId: string;
     };
     expect(event.messageId).toBe('TARGET_MSG_ID');
-    expect(event.chatId).toBe('628111@s.whatsapp.net');
+    expect(event.chatId).toBe('628111@c.us'); // canonicalized to the neutral dialect
     expect(event.reaction).toBe('👍');
-    expect(event.senderId).toBe('628111@s.whatsapp.net');
+    expect(event.senderId).toBe('628111@c.us'); // canonicalized to the neutral dialect
   });
 
   it('media download failure: logs the error and emits the message without media (no throw)', async () => {
@@ -1112,6 +1179,26 @@ describe('BaileysAdapter group management', () => {
     expect((await adapter.getGroupInfo('123-456@g.us'))?.id).toBe('123-456@g.us');
     fakeSock.groupMetadata.mockRejectedValueOnce(new Error('not a group'));
     expect(await adapter.getGroupInfo('x@g.us')).toBeNull();
+  });
+
+  it('getGroupInfo canonicalizes participant + owner ids through the session store (lid -> phone)', async () => {
+    const adapter = await ready();
+    // History sync supplies the lid -> phone mapping; the adapter passes the store's canonicalizer in.
+    fakeSock.fire('messaging-history.set', { lidPnMappings: [{ lid: '111@lid', pn: '628111@s.whatsapp.net' }] });
+    fakeSock.groupMetadata.mockResolvedValueOnce({
+      id: '123-456@g.us',
+      subject: 'G',
+      owner: '111@lid',
+      participants: [
+        { id: '111@lid', admin: 'superadmin' },
+        { id: '222@lid', admin: null },
+      ],
+    });
+    const info = await adapter.getGroupInfo('123-456@g.us');
+    // Owner + the known admin fold to <phone>@c.us, so they share the dialect of canonicalized authors.
+    expect(info?.owner).toBe('628111@c.us');
+    expect(info?.participants[0]).toMatchObject({ id: '628111@c.us', number: '628111', isSuperAdmin: true });
+    expect(info?.participants[1]).toMatchObject({ id: '222@lid', number: '222' }); // unresolved kept raw
   });
 
   it('createGroup returns the mapped new group', async () => {

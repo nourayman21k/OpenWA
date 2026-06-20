@@ -466,14 +466,16 @@ export class BaileysAdapter implements IWhatsAppEngine {
     this.ensureReady();
     const all = await this.sock!.groupFetchAllParticipating();
     const self = this.normalizedSelfJid();
-    return Object.values(all).map(metadata => mapBaileysGroup(metadata, self));
+    return Object.values(all).map(metadata =>
+      mapBaileysGroup(metadata, self, jid => this.sessionStore.toNeutralJid(jid)),
+    );
   }
 
   async getGroupInfo(groupId: string): Promise<GroupInfo | null> {
     this.ensureReady();
     try {
       const metadata = await this.sock!.groupMetadata(groupId);
-      return mapBaileysGroupInfo(metadata);
+      return mapBaileysGroupInfo(metadata, jid => this.sessionStore.toNeutralJid(jid));
     } catch (err) {
       this.logger.debug('groupMetadata failed; treating as not-found', {
         groupId,
@@ -486,7 +488,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
   async createGroup(name: string, participants: string[]): Promise<Group> {
     this.ensureReady();
     const metadata = await this.sock!.groupCreate(name, participants);
-    return mapBaileysGroup(metadata, this.normalizedSelfJid());
+    return mapBaileysGroup(metadata, this.normalizedSelfJid(), jid => this.sessionStore.toNeutralJid(jid));
   }
 
   async addParticipants(groupId: string, participants: string[]): Promise<void> {
@@ -709,9 +711,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
           const to = msg.key.fromMe === true ? remoteJid : this.normalizedSelfJid();
           const revoked: RevokedMessage = {
             id: pm.key?.id ?? '',
-            chatId: remoteJid,
-            from,
-            to,
+            chatId: this.sessionStore.toNeutralJid(remoteJid),
+            from: this.sessionStore.toNeutralJid(from),
+            to: this.sessionStore.toNeutralJid(to),
             type: 'revoked',
             body: '',
             timestamp: this.toUnixSeconds(msg.messageTimestamp),
@@ -728,9 +730,9 @@ export class BaileysAdapter implements IWhatsAppEngine {
         const rm = msg.message?.reactionMessage;
         const event: ReactionEvent = {
           messageId: rm?.key?.id ?? '',
-          chatId: remoteJid,
+          chatId: this.sessionStore.toNeutralJid(remoteJid),
           reaction: rm?.text ?? '',
-          senderId: msg.key.participant ?? remoteJid,
+          senderId: this.sessionStore.toNeutralJid(msg.key.participant ?? remoteJid),
         };
         this.callbacks.onMessageReaction?.(event);
         return;
@@ -883,21 +885,24 @@ export class BaileysAdapter implements IWhatsAppEngine {
       quotedMessage = { id: contextInfo.stanzaId, body: qBody };
     }
 
-    return buildIncomingMessageFromBaileys({
-      id: msg.key.id ?? '',
-      remoteJid: msg.key.remoteJid!,
-      fromMe: msg.key.fromMe === true,
-      participant: msg.key.participant ?? undefined,
-      body,
-      contentType,
-      isPtt: content.audioMessage?.ptt === true,
-      timestamp: this.toUnixSeconds(msg.messageTimestamp),
-      pushName: msg.pushName ?? undefined,
-      selfJid: this.normalizedSelfJid(),
-      media,
-      location,
-      quotedMessage,
-    });
+    return buildIncomingMessageFromBaileys(
+      {
+        id: msg.key.id ?? '',
+        remoteJid: msg.key.remoteJid!,
+        fromMe: msg.key.fromMe === true,
+        participant: msg.key.participant ?? undefined,
+        body,
+        contentType,
+        isPtt: content.audioMessage?.ptt === true,
+        timestamp: this.toUnixSeconds(msg.messageTimestamp),
+        pushName: msg.pushName ?? undefined,
+        selfJid: this.normalizedSelfJid(),
+        media,
+        location,
+        quotedMessage,
+      },
+      jid => this.sessionStore.toNeutralJid(jid),
+    );
   }
 
   private normalizedSelfJid(): string {

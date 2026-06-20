@@ -1,5 +1,6 @@
 import type { Chat, Contact as BaileysContact, WAMessage, WAMessageKey } from '@whiskeysockets/baileys';
 import { ChatSummary, Contact } from '../interfaces/whatsapp-engine.interface';
+import { parseWaId, toNeutralJid as canonicalizeWaId, userPart } from '../identity/wa-id';
 
 /**
  * Baileys `Contact` does not include a `phoneNumber` field, but WhatsApp Business events may supply
@@ -90,26 +91,35 @@ export class BaileysSessionStore {
   }
 
   resolvePhone(id: string): string | null {
-    if (id.endsWith('@s.whatsapp.net')) {
-      return this.userPart(id);
+    const parsed = parseWaId(id);
+    // A user id (@c.us / @s.whatsapp.net) already carries the phone as its user-part. The @c.us case
+    // matters once inbound ids are canonicalized: a resolved-lid sender arrives as <phone>@c.us.
+    if (parsed.kind === 'user') {
+      return parsed.userPart;
     }
-    if (id.endsWith('@lid')) {
-      const pn = this.lidToPn.get(id);
+    if (parsed.kind === 'lid') {
+      // Look up by the device-stripped lid; mappings/contacts are keyed without a :device suffix.
+      const lidJid = `${parsed.userPart}@lid`;
+      const pn = this.lidToPn.get(lidJid) ?? this.lidToPn.get(id);
       if (pn) {
-        return this.userPart(pn);
+        return userPart(pn);
       }
-      const contactPhone = this.contacts.get(id)?.phoneNumber;
-      return contactPhone ? this.userPart(contactPhone) : null;
+      const contactPhone = (this.contacts.get(lidJid) ?? this.contacts.get(id))?.phoneNumber;
+      return contactPhone ? userPart(contactPhone) : null;
     }
     return null;
   }
 
+  /**
+   * Canonicalize a Baileys JID to the neutral dialect (see {@link canonicalizeWaId} / wa-id.ts),
+   * resolving a lid to its phone via this session's lid->pn map when the mapping is known.
+   */
+  toNeutralJid(jid: string): string {
+    return canonicalizeWaId(jid, id => this.resolvePhone(id));
+  }
+
   private toNeutralContact(c: BaileysContactWithPhone): Contact {
-    const number = c.phoneNumber
-      ? this.userPart(c.phoneNumber)
-      : c.id.endsWith('@s.whatsapp.net')
-        ? this.userPart(c.id)
-        : '';
+    const number = c.phoneNumber ? userPart(c.phoneNumber) : c.id.endsWith('@s.whatsapp.net') ? userPart(c.id) : '';
     return {
       id: c.id,
       name: c.name ?? c.verifiedName,
@@ -125,16 +135,12 @@ export class BaileysSessionStore {
     const last = this.lastMessages.get(c.id);
     return {
       id: c.id,
-      name: c.name ?? this.userPart(c.id),
+      name: c.name ?? userPart(c.id),
       isGroup: c.id.endsWith('@g.us'),
       unreadCount: c.unreadCount ?? 0,
       timestamp: last?.timestamp ?? this.toUnixSeconds(c.conversationTimestamp),
       lastMessage: last?.text,
     };
-  }
-
-  private userPart(jid: string): string {
-    return jid.split('@')[0].split(':')[0];
   }
 
   private toUnixSeconds(ts: number | { toNumber(): number } | null | undefined): number {
