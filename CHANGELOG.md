@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Smart webhook filters (optional, additive).** A webhook trigger can now carry an optional set of
+  pre-dispatch conditions, evaluated per event before delivery: it fires only when **all** conditions
+  match (AND). Conditions match on `sender` / `recipient` / `body` / `type` / `mentions` / `fromMe` /
+  `hasMedia` / `isGroup` with `is` / `isNot` / `contains` / `equals` operators;
+  message-only conditions are skipped for non-message events, so a `*`-subscribed webhook still fires on
+  session events. A webhook with no filters behaves exactly as before. Contact-id conditions
+  (`sender`/`recipient`/`mentions`) match by the engine-neutral `WaId` key, so a filter written as a
+  plain number or in any dialect (`@c.us` / `@s.whatsapp.net` / `@lid`) matches the same person - and a
+  lid-addressed sender (e.g. an unresolved `@lid` group participant) matches a phone filter once the
+  persistent `lid -> phone` table knows the mapping. Configurable via the API (`filters` on create/update)
+  and a new FilterBuilder UI on the dashboard's Webhooks page. (#379)
+
 - **Configurable first-boot init timeout for the whatsapp-web.js engine (`WWEBJS_AUTH_TIMEOUT_MS`).**
   On slow first boots (e.g. WSL2 or low-resource containers) the engine's fixed 30s wait for WhatsApp
   Web to finish loading could expire before the QR code was generated, aborting startup. Set
