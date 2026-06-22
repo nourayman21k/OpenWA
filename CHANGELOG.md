@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Mark a chat as unread: `POST /sessions/:id/chats/unread` (and `sessionApi.markChatUnread` on the dashboard client), the inverse of mark-as-read, supported on both the whatsapp-web.js and Baileys engines. (#432)
+
 ### Security
 
 - Untrusted (uploaded) plugins now run with a minimal, allowlisted worker environment instead of inheriting the host process environment, so a plugin can no longer read host secrets (database/Redis credentials, the API master key and pepper, `DOCKER_HOST`) out of `process.env`. (#431)
