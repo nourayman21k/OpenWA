@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Sandboxed plugins now receive `onConfigChange` (config updates reach the worker instead of being silently ignored until disable + re-enable) and have their real `healthCheck` run — `GET /plugins/:id/health` previously always returned the default "healthy" for sandboxed plugins. (#430)
+- Plugin `onDisable` now runs on graceful shutdown (`OnModuleDestroy`), so stateful plugins can flush buffers / close connections / persist state instead of losing in-flight work on every restart or deploy. (#430)
+- A concurrent enable of the same plugin no longer double-runs `onEnable` or double-registers its hooks (a synchronous in-progress lock rejects the racing call). (#430)
+- Plugin storage writes — `ctx.storage.set()` and the plugin registry — are now atomic (write to a temp file then rename), so a crash mid-write can't leave a truncated file that silently degrades to lost state. (#430)
+
+### Changed
+
+- The plugin-management UI strings (install/uninstall, the status rail, and the install modal) are now translated into every locale instead of falling back to English. (#429)
+
 ## [0.6.1] - 2026-06-22
 
 A patch closing a plugin-hook gap.
