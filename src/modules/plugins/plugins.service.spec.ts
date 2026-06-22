@@ -7,6 +7,7 @@ import { ModuleRef } from '@nestjs/core';
 import { PluginsService } from './plugins.service';
 import { PluginLoaderService } from '../../core/plugins/plugin-loader.service';
 import { PluginStorageService } from '../../core/plugins/plugin-storage.service';
+import { PluginStatus } from '../../core/plugins/plugin.interfaces';
 import { HookManager } from '../../core/hooks';
 
 const manifest = { id: 'svc-plg', name: 'Svc Plugin', version: '1.0.0', type: 'extension', main: 'index.js' };
@@ -37,7 +38,7 @@ describe('PluginsService — install / uninstall (real loader + disk)', () => {
       new PluginStorageService(config),
       {} as unknown as ModuleRef,
     );
-    service = new PluginsService(loader);
+    service = new PluginsService(loader, config);
   });
   afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
@@ -78,5 +79,45 @@ describe('PluginsService — install / uninstall (real loader + disk)', () => {
 
   it('uninstalling an unknown plugin throws NotFound', async () => {
     await expect(service.uninstall('nope')).rejects.toThrow(/not found/i);
+  });
+
+  it('updatePackage swaps to the new version and preserves operator config', async () => {
+    service.install({ buffer: pkg({ version: '1.0.0' }) });
+    service.updateConfig('svc-plg', { apiKey: 'secret-123' });
+
+    const dto = await service.updatePackage('svc-plg', pkg({ version: '2.0.0' }));
+
+    expect(dto.version).toBe('2.0.0');
+    expect(dto.config).toEqual({ apiKey: 'secret-123' }); // config survived the in-place update
+    expect(fs.existsSync(path.join(pluginsDir, 'svc-plg', 'index.js'))).toBe(true);
+    expect(fs.existsSync(path.join(pluginsDir, 'svc-plg.bak'))).toBe(false); // backup cleaned up
+  });
+
+  it('updatePackage rejects a package whose id does not match', async () => {
+    service.install({ buffer: pkg() });
+    await expect(service.updatePackage('svc-plg', pkg({ id: 'other-plg' }))).rejects.toThrow(/does not match/i);
+  });
+
+  it('updatePackage on an unknown plugin throws NotFound', async () => {
+    await expect(service.updatePackage('nope', pkg())).rejects.toThrow(/not found/i);
+  });
+
+  it('rolls back to the OLD version (loaded, on disk) when the new version fails to enable', async () => {
+    service.install({ buffer: pkg({ version: '1.0.0' }) });
+    // Pretend it was enabled so the update tries to re-enable — and that re-enable fails for the new version.
+    loader.getPlugin('svc-plg')!.status = PluginStatus.ENABLED;
+    const enableSpy = jest.spyOn(loader, 'enablePlugin').mockRejectedValue(new Error('worker failed to enable'));
+
+    await expect(service.updatePackage('svc-plg', pkg({ version: '2.0.0' }))).rejects.toThrow(/Failed to update/i);
+
+    // The rollback must leave the OLD version loaded — not the new, half-enabled (ERROR) instance.
+    expect(loader.getPlugin('svc-plg')?.manifest.version).toBe('1.0.0');
+    expect(fs.existsSync(path.join(pluginsDir, 'svc-plg.bak'))).toBe(false);
+    const onDisk = JSON.parse(fs.readFileSync(path.join(pluginsDir, 'svc-plg', 'manifest.json'), 'utf8')) as {
+      version: string;
+    };
+    expect(onDisk.version).toBe('1.0.0');
+
+    enableSpy.mockRestore();
   });
 });

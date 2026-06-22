@@ -1,14 +1,23 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException, HttpException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PluginLoaderService, PluginStatus } from '../../core/plugins';
 import { PluginDto } from './dto/plugin.dto';
 import { redactSecretConfig, restoreSecretConfig } from './redact-config';
 import { parsePluginPackage } from './plugin-installer';
+import { fetchSafeBuffer } from './plugin-download';
+import { annotateCatalog, CatalogEntry, CatalogPlugin } from './catalog';
+
+/** Cap on the catalog JSON download (the catalog is small; this bounds a hostile response). */
+const CATALOG_MAX_BYTES = 1 * 1024 * 1024;
 
 @Injectable()
 export class PluginsService {
-  constructor(private readonly pluginLoader: PluginLoaderService) {}
+  constructor(
+    private readonly pluginLoader: PluginLoaderService,
+    private readonly configService: ConfigService,
+  ) {}
 
   findAll(): PluginDto[] {
     const plugins = this.pluginLoader.getAllPlugins();
@@ -155,6 +164,138 @@ export class PluginsService {
     }
 
     return this.findOne(manifest.id);
+  }
+
+  /**
+   * Install a plugin from an HTTP(S) URL: download the .zip through the SSRF guard (host validated,
+   * connection pinned, redirects refused, size-capped), then run the exact same validate-write-load
+   * pipeline as an uploaded package. The downloaded buffer is treated as untrusted, identical to an upload.
+   */
+  async installFromUrl(url: string): Promise<PluginDto> {
+    const maxBytes = this.configService.get<number>('plugins.downloadMaxBytes') ?? 5 * 1024 * 1024;
+    let buffer: Buffer;
+    try {
+      buffer = await fetchSafeBuffer(url, { maxBytes });
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to download plugin from URL: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return this.install({ buffer });
+  }
+
+  /**
+   * Fetch the configured remote catalog (a plugins.json array) through the SSRF guard and annotate each
+   * entry with this instance's install state (installed / installedVersion / updateAvailable).
+   */
+  async getCatalog(): Promise<CatalogPlugin[]> {
+    const url = this.configService.get<string>('plugins.catalogUrl');
+    if (!url) return [];
+
+    let raw: Buffer;
+    try {
+      raw = await fetchSafeBuffer(url, { maxBytes: CATALOG_MAX_BYTES });
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to fetch plugin catalog: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    let entries: CatalogEntry[];
+    try {
+      const parsed: unknown = JSON.parse(raw.toString('utf8'));
+      if (!Array.isArray(parsed)) throw new Error('catalog is not a JSON array');
+      entries = parsed as CatalogEntry[];
+    } catch (error) {
+      throw new BadRequestException(
+        `Invalid plugin catalog JSON: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    const installed = this.pluginLoader.getAllPlugins().map(p => ({ id: p.manifest.id, version: p.manifest.version }));
+    return annotateCatalog(entries, installed);
+  }
+
+  /**
+   * Update an installed plugin in place from a validated package buffer, preserving operator config and
+   * the enabled state. The package id must match the installed id. Config survives because `unloadPlugin`
+   * drops the plugin from memory but keeps its registry entry (config); `loadPlugin` re-reads it. The old
+   * directory is backed up and restored if the swap or reload of the new version fails, so a bad update
+   * never leaves the plugin broken.
+   */
+  async updatePackage(id: string, buffer: Buffer): Promise<PluginDto> {
+    const plugin = this.pluginLoader.getPlugin(id);
+    if (!plugin) {
+      throw new NotFoundException(`Plugin ${id} not found`);
+    }
+    if (this.pluginLoader.isBuiltIn(id)) {
+      throw new BadRequestException(`Cannot update built-in plugin ${id}`);
+    }
+
+    // Validate the new package BEFORE touching the running plugin. An update must be the same plugin.
+    const { manifest, entries } = parsePluginPackage(buffer);
+    if (manifest.id !== id) {
+      throw new BadRequestException(`Package id "${manifest.id}" does not match the plugin being updated ("${id}")`);
+    }
+
+    const wasEnabled = plugin.status === PluginStatus.ENABLED;
+    const dir = path.join(this.pluginLoader.getPluginsDir(), id);
+    const backup = `${dir}.bak`;
+
+    // Stop the running plugin (terminates its sandbox worker) but keep its registry entry so config survives.
+    await this.pluginLoader.unloadPlugin(id);
+
+    fs.rmSync(backup, { recursive: true, force: true });
+    fs.renameSync(dir, backup);
+
+    try {
+      for (const entry of entries) {
+        const dest = path.join(dir, entry.relPath);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.writeFileSync(dest, entry.data);
+      }
+      this.pluginLoader.loadPlugin(dir);
+      if (wasEnabled) {
+        await this.pluginLoader.enablePlugin(id);
+      }
+      fs.rmSync(backup, { recursive: true, force: true });
+    } catch (error) {
+      // Roll back to the previous version: restore the backed-up directory and reload it.
+      // The failed forward path may have left the NEW version in the loader map (loadPlugin
+      // succeeded; enablePlugin failed with status=ERROR but did NOT remove it), so drop it first —
+      // otherwise the restore's loadPlugin() hits the "already loaded" guard and the runtime stays
+      // desynced from disk (new manifest in memory, old files on disk). unloadPlugin throws when
+      // nothing is loaded (the loadPlugin-itself-failed case), hence the catch.
+      await this.pluginLoader.unloadPlugin(id).catch(() => undefined);
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.renameSync(backup, dir);
+      try {
+        this.pluginLoader.loadPlugin(dir);
+        if (wasEnabled) await this.pluginLoader.enablePlugin(id);
+      } catch {
+        /* best-effort restore; surface the original failure below */
+      }
+      if (error instanceof HttpException) throw error;
+      throw new BadRequestException(
+        `Failed to update plugin: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return this.findOne(id);
+  }
+
+  /** Update an installed plugin by downloading the new package from a URL (SSRF-guarded), then in place. */
+  async updateFromUrl(id: string, url: string): Promise<PluginDto> {
+    const maxBytes = this.configService.get<number>('plugins.downloadMaxBytes') ?? 5 * 1024 * 1024;
+    let buffer: Buffer;
+    try {
+      buffer = await fetchSafeBuffer(url, { maxBytes });
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to download plugin from URL: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return this.updatePackage(id, buffer);
   }
 
   /** Uninstall an installed user plugin: disable, unload, and delete its files. Built-ins are protected. */
