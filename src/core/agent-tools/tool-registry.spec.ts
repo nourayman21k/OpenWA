@@ -1,10 +1,10 @@
 import { ToolRegistryService } from './tool-registry.service';
 import type { ToolDescriptor } from './tool-descriptor';
-import type { SessionService } from '../../../modules/session/session.service';
-import type { MessageService } from '../../../modules/message/message.service';
-import type { ContactService } from '../../../modules/contact/contact.service';
-import type { GroupService } from '../../../modules/group/group.service';
-import type { WebhookService } from '../../../modules/webhook/webhook.service';
+import type { SessionService } from '../../modules/session/session.service';
+import type { MessageService } from '../../modules/message/message.service';
+import type { ContactService } from '../../modules/contact/contact.service';
+import type { GroupService } from '../../modules/group/group.service';
+import type { WebhookService } from '../../modules/webhook/webhook.service';
 import { z } from 'zod';
 import { sessionTools } from './tools/session.tools';
 import { messageTools } from './tools/message.tools';
