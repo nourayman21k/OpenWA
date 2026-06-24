@@ -11,8 +11,9 @@ export function readRateLimitConfig(env: NodeJS.ProcessEnv = process.env): { max
   const parsePositiveInt = (raw: string | undefined, fallback: number): number => {
     if (!raw || raw.trim() === '') return fallback;
     const n = Number(raw);
-    if (!Number.isFinite(n) || n <= 0) return fallback;
-    return Math.trunc(n);
+    if (!Number.isFinite(n)) return fallback;
+    const i = Math.floor(n);
+    return i >= 1 ? i : fallback;
   };
 
   return {

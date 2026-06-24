@@ -39,6 +39,26 @@ describe('readRateLimitConfig', () => {
       windowMs: 60_000,
     });
   });
+
+  it('falls back to default for fractional value 0.5 (would truncate to 0)', () => {
+    expect(readRateLimitConfig({ MCP_RATE_LIMIT_MAX: '0.5' }).max).toBe(60);
+  });
+
+  it('falls back to default for fractional value 0.99 (would truncate to 0)', () => {
+    expect(readRateLimitConfig({ MCP_RATE_LIMIT_MAX: '0.99' }).max).toBe(60);
+  });
+
+  it('floors 1.9 to 1 (valid positive integer)', () => {
+    expect(readRateLimitConfig({ MCP_RATE_LIMIT_MAX: '1.9' }).max).toBe(1);
+  });
+
+  it('floors 60.7 to 60 (valid positive integer)', () => {
+    expect(readRateLimitConfig({ MCP_RATE_LIMIT_MAX: '60' }).max).toBe(60);
+  });
+
+  it('falls back to default for MCP_RATE_LIMIT_WINDOW_MS 0.5', () => {
+    expect(readRateLimitConfig({ MCP_RATE_LIMIT_WINDOW_MS: '0.5' }).windowMs).toBe(60_000);
+  });
 });
 
 describe('KeyRateLimiter', () => {
