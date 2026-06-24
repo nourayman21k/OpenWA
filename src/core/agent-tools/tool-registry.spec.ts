@@ -91,11 +91,11 @@ describe('v1 tool surface snapshot', () => {
     ].sort();
 
     const actualNames = [
-      ...sessionTools({} as unknown as SessionService), // eslint-disable-line @typescript-eslint/no-unsafe-argument
-      ...messageTools({} as unknown as MessageService), // eslint-disable-line @typescript-eslint/no-unsafe-argument
-      ...contactTools({} as unknown as ContactService), // eslint-disable-line @typescript-eslint/no-unsafe-argument
-      ...groupTools({} as unknown as GroupService), // eslint-disable-line @typescript-eslint/no-unsafe-argument
-      ...webhookTools({} as unknown as WebhookService), // eslint-disable-line @typescript-eslint/no-unsafe-argument
+      ...sessionTools({} as unknown as SessionService),
+      ...messageTools({} as unknown as MessageService),
+      ...contactTools({} as unknown as ContactService),
+      ...groupTools({} as unknown as GroupService),
+      ...webhookTools({} as unknown as WebhookService),
     ]
       .map(t => t.name)
       .sort();
