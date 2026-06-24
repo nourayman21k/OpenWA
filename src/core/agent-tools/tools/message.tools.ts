@@ -3,7 +3,7 @@ import { ApiKeyRole } from '../../../modules/auth/entities/api-key.entity';
 import type { MessageService } from '../../../modules/message/message.service';
 import type { ToolDescriptor } from '../tool-descriptor';
 
-const sessionId = z.string().describe('Session UUID (the session id, not the name)');
+const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
 
 export function messageTools(message: MessageService): ToolDescriptor[] {
   return [
@@ -17,7 +17,7 @@ export function messageTools(message: MessageService): ToolDescriptor[] {
         sessionId,
         chatId: z.string().optional().describe('Filter to a specific chat JID'),
         from: z.string().optional().describe('Filter by sender phone or JID'),
-        limit: z.number().int().min(1).max(500).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
         offset: z.number().int().min(0).optional(),
       }),
       handler: (input: { sessionId: string; chatId?: string; from?: string; limit?: number; offset?: number }) =>
@@ -37,7 +37,13 @@ export function messageTools(message: MessageService): ToolDescriptor[] {
       inputSchema: z.object({
         sessionId,
         chatId: z.string().describe('Chat JID (e.g. 1234567890@c.us or groupId@g.us)'),
-        limit: z.number().int().min(1).max(2000).optional(),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(2000)
+          .optional()
+          .describe('Number of messages to fetch; without deep:true the engine caps at 100'),
         includeMedia: z.boolean().optional().describe('Download media as base64 (slower)'),
         deep: z.boolean().optional().describe('Raise limit ceiling to 2000 for reaching further back in history'),
       }),

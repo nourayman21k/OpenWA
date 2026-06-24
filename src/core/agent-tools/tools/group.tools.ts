@@ -3,7 +3,7 @@ import { ApiKeyRole } from '../../../modules/auth/entities/api-key.entity';
 import type { GroupService } from '../../../modules/group/group.service';
 import type { ToolDescriptor } from '../tool-descriptor';
 
-const sessionId = z.string().describe('Session UUID (the session id, not the name)');
+const sessionId = z.string().min(1).describe('Session UUID (the session id, not the name)');
 
 export function groupTools(group: GroupService): ToolDescriptor[] {
   return [
