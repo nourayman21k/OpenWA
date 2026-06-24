@@ -76,4 +76,29 @@ describe('invokeTool', () => {
       ForbiddenException,
     );
   });
+
+  // FIX 3(b): onAuthenticated callback
+  it('calls onAuthenticated with apiKey.id after successful validateApiKey', async () => {
+    const a = auth({ id: 'key-abc' });
+    const onAuthenticated = jest.fn();
+    await invokeTool(readTool, { n: 1 }, 'rawkey', a as unknown as AuthService, onAuthenticated);
+    expect(onAuthenticated).toHaveBeenCalledTimes(1);
+    expect(onAuthenticated).toHaveBeenCalledWith('key-abc');
+  });
+
+  it('does NOT call onAuthenticated when validateApiKey throws', async () => {
+    const a = auth();
+    (a.validateApiKey as jest.Mock).mockRejectedValueOnce(new UnauthorizedException('bad key'));
+    const onAuthenticated = jest.fn();
+    await expect(
+      invokeTool(readTool, { n: 1 }, 'rawkey', a as unknown as AuthService, onAuthenticated),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(onAuthenticated).not.toHaveBeenCalled();
+  });
+
+  it('works without onAuthenticated (backward compatible)', async () => {
+    const a = auth();
+    // No 5th argument — must not throw
+    await expect(invokeTool(readTool, { n: 1 }, 'rawkey', a as unknown as AuthService)).resolves.toBeDefined();
+  });
 });

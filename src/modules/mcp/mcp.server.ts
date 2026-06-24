@@ -65,8 +65,7 @@ function buildServer(
       async (input: Record<string, unknown>, extra: ToolExtra) => {
         const rawKey = extractApiKey(extra);
         try {
-          rateLimiter.check(rawKey ?? '');
-          const result = await invokeTool(tool, input, rawKey, authService);
+          const result = await invokeTool(tool, input, rawKey, authService, id => rateLimiter.check(id));
           return tool.resultDisposition === 'json'
             ? jsonToolResult(result as object)
             : smartToolResult(result as object);

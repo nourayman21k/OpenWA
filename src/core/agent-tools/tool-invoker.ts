@@ -9,12 +9,18 @@ import type { ToolDescriptor } from './tool-descriptor';
  * Mirrors the REST guard-then-pipe order (auth before validation).
  * `clientIp` is undefined over MCP — a key with allowedIps therefore fails closed
  * inside validateApiKey (documented limitation).
+ *
+ * @param onAuthenticated Optional callback invoked with `apiKey.id` immediately
+ * after `validateApiKey` succeeds and BEFORE role/input checks. Use this to
+ * key rate-limiters off the authenticated identity rather than the raw header
+ * string, preventing pre-auth bucket allocation by anonymous callers.
  */
 export async function invokeTool(
   tool: ToolDescriptor,
   rawInput: unknown,
   rawKey: string | undefined,
   authService: AuthService,
+  onAuthenticated?: (apiKeyId: string) => void,
 ): Promise<unknown> {
   if (!rawKey) {
     throw new UnauthorizedException('Missing API key');
@@ -25,6 +31,8 @@ export async function invokeTool(
   const sessionId = tool.sessionScoped && typeof probe.sessionId === 'string' ? probe.sessionId : undefined;
 
   const apiKey = await authService.validateApiKey(rawKey, undefined, sessionId);
+  onAuthenticated?.(apiKey.id);
+
   if (tool.requiredRole && !authService.hasPermission(apiKey, tool.requiredRole)) {
     throw new ForbiddenException('API key lacks the required role');
   }

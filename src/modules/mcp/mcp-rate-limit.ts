@@ -17,6 +17,10 @@ export class KeyRateLimiter {
   check(key: string): void {
     const t = this.now();
     const recent = (this.hits.get(key) ?? []).filter(ts => t - ts < this.windowMs);
+    if (recent.length === 0) {
+      // All prior hits have expired — prune the bucket rather than accumulating stale entries.
+      this.hits.delete(key);
+    }
     if (recent.length >= this.max) {
       throw new HttpException('MCP rate limit exceeded', HttpStatus.TOO_MANY_REQUESTS);
     }
