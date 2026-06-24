@@ -1,4 +1,4 @@
-# @openwa/client
+# @rmyndharis/openwa
 
 Official JavaScript/TypeScript SDK for the [OpenWA](https://github.com/rmyndharis/OpenWA) WhatsApp API Gateway.
 
@@ -10,7 +10,7 @@ Ships dual CJS + ESM builds with bundled type declarations.
 > of the repo (`cd sdk/javascript && npm install && npm run build`) or from git.
 
 ```bash
-npm install @openwa/client   # once published
+npm install @rmyndharis/openwa   # once published
 ```
 
 Requires Node.js >= 18 (relies on the global `fetch`).
@@ -18,7 +18,7 @@ Requires Node.js >= 18 (relies on the global `fetch`).
 ## Usage
 
 ```typescript
-import { OpenWAClient } from '@openwa/client';
+import { OpenWAClient } from '@rmyndharis/openwa';
 
 const client = new OpenWAClient({
   baseUrl: 'https://your-gateway.example.com',
@@ -34,7 +34,7 @@ const result = await client.messages.sendText('my-session', {
 console.log(result.messageId);
 ```
 
-CommonJS consumers use `require('@openwa/client')` identically.
+CommonJS consumers use `require('@rmyndharis/openwa')` identically.
 
 ## Errors
 

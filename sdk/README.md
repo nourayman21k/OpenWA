@@ -17,13 +17,13 @@ hand-written resource methods.
 
 | Language                | Package                         | Notes                       |
 | ----------------------- | ------------------------------- | --------------------------- |
-| JavaScript / TypeScript | [`@openwa/client`](javascript/) | dual ESM/CJS, bundled types |
-| Python                  | [`openwa-client`](python/)      | sync (httpx), PEP 561 typed |
-| PHP                     | [`openwa/client`](php/)         | sync (Guzzle, PHP 8.1+)     |
+| JavaScript / TypeScript | [`@rmyndharis/openwa`](javascript/) | dual ESM/CJS, bundled types |
+| Python                  | [`rmyndharis-openwa`](python/)      | sync (httpx), PEP 561 typed |
+| PHP                     | [`rmyndharis/openwa`](php/)         | sync (Guzzle, PHP 8.1+)     |
 
 ## Coverage
 
-Both SDKs expose the same fluent resource surface:
+All three SDKs expose the same fluent resource surface:
 
 | Resource   | Methods                                                                                                                                                                                |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -53,7 +53,7 @@ npm run build     # dual ESM + CJS output in dist/
 ```
 
 ```typescript
-import { OpenWAClient } from '@openwa/client';
+import { OpenWAClient } from '@rmyndharis/openwa';
 
 const client = new OpenWAClient({
   baseUrl: 'http://localhost:2785',
@@ -71,7 +71,7 @@ console.log(result.messageId);
 Errors are typed — branch with `instanceof`:
 
 ```typescript
-import { OpenWANotFoundError, OpenWAConflictError } from '@openwa/client';
+import { OpenWANotFoundError, OpenWAConflictError } from '@rmyndharis/openwa';
 try {
   await client.messages.sendText(/* … */);
 } catch (e) {

@@ -6,7 +6,7 @@
  * resources as properties:
  *
  * ```typescript
- * import { OpenWAClient } from '@openwa/client';
+ * import { OpenWAClient } from '@rmyndharis/openwa';
  *
  * const client = new OpenWAClient({
  *   baseUrl: 'http://localhost:2785',
