@@ -9,11 +9,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, In, Not, IsNull, DataSource, FindManyOptions } from 'typeorm';
+import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Session, SessionStatus } from './entities/session.entity';
 import { Message, MessageDirection, MessageStatus } from '../message/entities/message.entity';
 import { CreateSessionDto } from './dto';
 import { EngineFactory } from '../../engine/engine.factory';
 import { paginate, ListOptions } from '../../common/utils/paginate';
+import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 import {
   IWhatsAppEngine,
   EngineStatus,
@@ -485,7 +487,15 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
           return row;
         });
       if (rows.length) {
-        await this.messageRepository.save(rows);
+        // Insert-or-ignore: a live onMessage insert can land between the `seen` SELECT above and this
+        // write, colliding on UNIQUE(sessionId, waMessageId). orIgnore skips the collision instead of
+        // throwing and aborting the whole batch (history is best-effort, persist-never-dispatch).
+        await this.messageRepository
+          .createQueryBuilder()
+          .insert()
+          .values(rows as unknown as QueryDeepPartialEntity<Message>[])
+          .orIgnore()
+          .execute();
         inserted += rows.length;
       }
     }
@@ -643,9 +653,24 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
               metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
             });
 
-            void this.messageRepository.save(dbMessage).catch(err => {
-              this.logger.error(`Failed to save incoming message ${incoming.id} to database`, String(err));
-            });
+            // De-duplicate at the source: the engine can re-fire `message` for one inbound message
+            // (#464). UNIQUE(sessionId, waMessageId) makes the insert the atomic dedup oracle — a
+            // near-simultaneous re-fire loses the race and is skipped here, so persist + webhook + WS
+            // happen exactly once. Fail-open: a non-conflict DB error still dispatches, so a real
+            // message is never dropped by a transient DB failure.
+            let isNewMessage = true;
+            try {
+              await this.messageRepository.insert(dbMessage as unknown as QueryDeepPartialEntity<Message>);
+            } catch (err) {
+              if (isUniqueConstraintError(err)) {
+                isNewMessage = false;
+              } else {
+                this.logger.error(`Failed to save incoming message ${incoming.id} to database`, String(err));
+              }
+            }
+            if (!isNewMessage) {
+              return; // duplicate re-fire — the original already persisted and dispatched
+            }
 
             // Dispatch to webhooks with potentially modified message
             void this.webhookService.dispatch(id, 'message.received', finalMessage);
