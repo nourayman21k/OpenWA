@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-06-25
+
 ### Added
 
 - MCP server (opt-in, `MCP_ENABLED=true`): exposes a curated ~39-tool agent surface (sessions, messaging, contacts, basic group ops, webhook reads) over the Model Context Protocol at `POST /mcp`, on the existing single port. Off by default — the MCP SDK is not loaded unless enabled, and every REST route is unchanged. Tools call the existing services and reuse the same API-key auth, role, and per-session scoping as REST; reads vs writes are tiered and `MCP_READONLY=true` mounts read tools only. Destructive/privileged operations are deliberately excluded from the surface. (relates to #256; salvages result-shaping from #461 — thanks @tobiasstrebitzer)
@@ -22,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Message timestamps are now consistently returned as a number on both SQLite and PostgreSQL. PostgreSQL previously returned the `bigint` column as a string, which broke strictly-typed SDK clients and arithmetic in non-coercing consumers.
 - A blank `DATABASE_PASSWORD` forwarded by the bundled Docker Compose file is now treated as unset, so an external-PostgreSQL password saved via the dashboard is applied instead of being shadowed by the empty value (a real host/`.env` value still keeps top precedence).
 - The Python and PHP SDKs now treat an unfollowed redirect (any `3xx`) as an error response, matching the JavaScript SDK. Redirects are never followed (so the API key is never re-sent to the target), which makes a `3xx` an unusable result rather than a fake success.
+- Duplicate inbound webhook deliveries: a single inbound WhatsApp message could reach a registered webhook (and the `messages` table) more than once because the engine can re-fire the message event. Inbound `message.received` is now de-duplicated server-side, enforced by a `UNIQUE(sessionId, waMessageId)` constraint (added with a lossless de-duplicating migration), so each message is persisted and dispatched once. The guard fails open — a transient DB error still delivers the message. Webhook delivery remains **at-least-once** (engines re-fire, failed deliveries retry), so handlers should still be idempotent on the `X-OpenWA-Idempotency-Key` header, now documented under Webhook Delivery Semantics. (#464)
 
 ## [0.7.2] - 2026-06-24
 
