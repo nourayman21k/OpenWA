@@ -792,29 +792,24 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
             .catch(onAckError);
         }
 
-        // Push the live delivery/read tick to the dashboard over the websocket (neutral status).
-        this.eventsGateway.emitMessageAck(id, { messageId, status });
+        // One ack payload, emitted identically over the socket and the webhook so a client coded
+        // against either channel sees the same shape. `id` mirrors the field every other message.*
+        // event carries (and the idempotency-key resolver reads). `ack` is a deprecated legacy field
+        // kept for backward compatibility — new consumers should read the neutral `status`.
+        const ackPayload = { id: messageId, messageId, status, ack: deliveryStatusToAck(status) };
+
+        // Push the live delivery/read tick to the dashboard over the websocket.
+        this.eventsGateway.emitMessageAck(id, ackPayload);
 
         // Dispatch the delivery/read receipt to webhooks (#155). Outgoing `message.sent` is handled
         // solely by `onMessageCreate`, so the ack path deliberately does NOT emit `message.sent`.
-        // `id` mirrors the field every other message.* webhook carries (and the idempotency key
-        // resolver reads). `ack` is a deprecated legacy field kept for backward compatibility —
-        // new consumers should read the neutral `status`.
-        void this.webhookService.dispatch(id, 'message.ack', {
-          id: messageId,
-          messageId,
-          status,
-          ack: deliveryStatusToAck(status),
-        });
+        void this.webhookService.dispatch(id, 'message.ack', ackPayload);
 
-        // Surface delivery failures actively so consumers don't have to poll for them (#220).
+        // Surface delivery failures actively so consumers don't have to poll for them (#220). Use a
+        // distinct object (not the shared ackPayload) so this separate event can't be perturbed by an
+        // in-place payload mutation in the concurrent message.ack dispatch's webhook:before hook.
         if (status === 'failed') {
-          void this.webhookService.dispatch(id, 'message.failed', {
-            id: messageId,
-            messageId,
-            status,
-            ack: deliveryStatusToAck(status),
-          });
+          void this.webhookService.dispatch(id, 'message.failed', { ...ackPayload });
         }
 
         // Notify plugins of the delivery/read receipt. The `message:ack` hook event was declared in
@@ -926,6 +921,11 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
         // scheduled (unlike onDisconnected), since re-scanning is required.
         this.sessionErrors.set(id, reason);
 
+        // A prior onDisconnected may have scheduled a reconnect. This failure is terminal
+        // (re-scan required), so cancel it — otherwise the pending timer would resurrect a
+        // session the operator must manually restart.
+        this.cancelReconnect(id);
+
         void this.hookManager.execute(
           'session:error',
           { reason },
@@ -1005,6 +1005,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       },
     );
 
+    // Clear any timer a prior scheduleReconnect left pending so two back-to-back disconnects
+    // don't stack two timers (which would run executeReconnect twice and double-init the engine).
+    if (state.timer) clearTimeout(state.timer);
     state.timer = setTimeout(() => {
       void this.executeReconnect(id, session, state);
     }, delay);
