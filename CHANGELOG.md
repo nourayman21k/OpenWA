@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-06-28
+
 ### Added
 
 - The Infrastructure page now shows the actual **WhatsApp Web build** the whatsapp-web.js engine is using (e.g. `2.3000.1042251103-alpha`) and how it was chosen (pinned via `WWEBJS_WEB_VERSION`, auto-resolved, or native), surfaced via `/infra/status`. The engine card previously showed only the npm library version (`whatsapp-web.js 1.34.7`), which is unrelated to the WA Web build that actually governs connection stability. (#488)
