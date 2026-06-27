@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Dashboard **chat thread UX**: URLs in messages are now clickable links, WhatsApp text formatting (bold/italic/strikethrough/monospace) renders, images open in a photo lightbox, and the scroll position is remembered per chat. Thanks @softronicve. (#484)
 - The Infrastructure page now shows the actual **WhatsApp Web build** the whatsapp-web.js engine is using (e.g. `2.3000.1042251103-alpha`) and how it was chosen (pinned via `WWEBJS_WEB_VERSION`, auto-resolved, or native), surfaced via `/infra/status`. The engine card previously showed only the npm library version (`whatsapp-web.js 1.34.7`), which is unrelated to the WA Web build that actually governs connection stability. (#488)
 - Infrastructure data **backup & restore**: export all Data-DB tables to a JSON file and import them back, wired into the database-switch flow. When you change the database backend, the restart dialog now warns that the new database starts empty and offers a one-click backup before switching; a storage switch warns that existing media is not moved. (#488)
 - The Infrastructure page flags any database/redis/storage setting that is **pinned by an environment variable** (its running value differs from the saved config), so it's clear a dashboard change won't apply until that variable is unset, instead of the control silently having no effect. (#488)
