@@ -480,7 +480,7 @@
     }
   },
   "messageTester": {
-    "title": "Tester Messaggi",
+    "title": "Messaggio di prova",
     "subtitle": "Invia messaggi di prova tramite le API",
     "compose": "Invia Messaggio di Prova",
     "responseTitle": "Risposta API",
