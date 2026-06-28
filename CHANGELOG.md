@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Bounded list pagination.** `GET /sessions` and `GET /webhooks` (and the matching agent tools) now accept `limit` (1–1000, default 1000) and `offset` query parameters, so large deployments can page through results instead of receiving an unbounded list. (#496)
+- **Concurrent-session cap.** New `MAX_CONCURRENT_SESSIONS` env (default `0` = unlimited) caps how many WhatsApp engines may run or initialize at once, protecting memory/Chromium-constrained hosts. (#496)
+- **Configurable Redis connect timeout.** New `REDIS_CONNECT_TIMEOUT_MS` (default `5000`) bounds how long the queue and cache connections wait when reaching Redis. (#496)
+
+### Fixed
+
+- **Webhook delivery during a Redis outage.** The webhook queue producer now fails fast instead of buffering indefinitely when Redis is unreachable, falling back to direct (signed, idempotent) delivery; the queue Worker keeps its offline queue so it still tolerates brief reconnects. (#496)
+- **Accurate session stats at scale.** `GET /sessions/stats` aggregates status counts in the database, so totals stay correct on deployments with more sessions than the list cap. (#496)
+- **Plugin storage key safety & portability.** Plugin storage keys are validated and encoded to filesystem-safe filenames (JID-style keys now work on Windows), with backward-compatible reads/deletes of pre-existing files. (#496)
+
+### Changed
+
+- Refreshed project documentation, roadmap, and testing strategy against the current baseline. (#496)
+
 ## [0.7.8] - 2026-06-28
 
 ### Added
