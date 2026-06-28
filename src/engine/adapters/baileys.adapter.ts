@@ -800,11 +800,24 @@ export class BaileysAdapter implements IWhatsAppEngine {
   postTextStatus(text: string, options: StatusPostOptions): Promise<StatusResult> {
     return this.postStatus({ text }, options);
   }
-  postImageStatus(_media: MediaInput, _options: StatusPostOptions): Promise<StatusResult> {
-    return this.unsupported('postImageStatus');
+  postImageStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+    return this.postMediaStatus('image', media, options);
   }
-  postVideoStatus(_media: MediaInput, _options: StatusPostOptions): Promise<StatusResult> {
-    return this.unsupported('postVideoStatus');
+  postVideoStatus(media: MediaInput, options: StatusPostOptions): Promise<StatusResult> {
+    return this.postMediaStatus('video', media, options);
+  }
+  private async postMediaStatus(
+    kind: 'image' | 'video',
+    media: MediaInput,
+    options: StatusPostOptions,
+  ): Promise<StatusResult> {
+    this.ensureReady();
+    const { data, mimetype } = await this.resolveMediaBuffer(media);
+    const content: AnyMessageContent =
+      kind === 'image'
+        ? { image: data, caption: options.caption, mimetype }
+        : { video: data, caption: options.caption, mimetype };
+    return this.postStatus(content, options);
   }
   deleteStatus(_statusId: string): Promise<void> {
     return this.unsupported('deleteStatus');
