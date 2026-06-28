@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Optional inbound-media skip.** New `MEDIA_DOWNLOAD_ENABLED` flag (default `true`) lets operators skip downloading inbound media entirely on both the whatsapp-web.js and Baileys engines — useful for text-only or low-resource deployments. When disabled, inbound messages omit the `media` field and report `hasMedia: false` in webhooks and the dashboard. (#492)
+
 ### Fixed
 
 - External-S3 setups no longer silently fall back to local disk after upgrading: `docker-compose.yml` again forwards the legacy `S3_ACCESS_KEY` / `S3_SECRET_KEY` (alongside the canonical `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`) so an existing `.env` keeps reaching the container, and the legacy names are blank-cleared so they can't shadow the dashboard config. (#488 follow-up)
@@ -14,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Infrastructure page now shows an error + retry (instead of an editable form seeded from defaults) when the live `/infra/status` can't be loaded, so a save can no longer flip a running built-in database/Redis/storage to external+empty. (#488 follow-up)
 - `/infra/status` no longer blocks on the WhatsApp Web version registry fetch, and that fetch is rate-limited after a failure, so a firewalled/offline host no longer stalls up to 5s on every status poll and every session start/reconnect. (#488 follow-up)
 - A replayed `message.sent` WebSocket echo no longer downgrades a chat message already shown as delivered/read; the live-append path now applies the same forward-only delivery-status merge as the ack path. (#484 follow-up)
+
+### Changed
+
+- **Italian translation update.** Refreshed the Italian (`it`) dashboard locale. Thanks @albanobattistella. (#491)
 
 ## [0.7.7] - 2026-06-28
 
