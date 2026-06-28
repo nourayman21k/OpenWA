@@ -1735,4 +1735,19 @@ describe('BaileysAdapter status posting', () => {
       { statusJidList: ['628111@s.whatsapp.net'], backgroundColor: undefined, font: undefined },
     );
   });
+
+  it('deleteStatus revokes by constructing the key from statusId (no store lookup)', async () => {
+    fakeSock.sendMessage.mockResolvedValue({ key: { id: 'STATUS1' } });
+    const adapter = await ready();
+    await adapter.deleteStatus('STATUS1');
+    expect(fakeSock.sendMessage).toHaveBeenCalledWith('status@broadcast', {
+      delete: {
+        remoteJid: 'status@broadcast',
+        fromMe: true,
+        id: 'STATUS1',
+        participant: '628999@s.whatsapp.net',
+      },
+    });
+    expect(fakeStore.getMessage).not.toHaveBeenCalled();
+  });
 });

@@ -819,8 +819,22 @@ export class BaileysAdapter implements IWhatsAppEngine {
         : { video: data, caption: options.caption, mimetype };
     return this.postStatus(content, options);
   }
-  deleteStatus(_statusId: string): Promise<void> {
-    return this.unsupported('deleteStatus');
+  /**
+   * Best-effort status revoke. Unlike deleteMessage, status messages are NOT persisted, so the revoke
+   * key must be constructed from statusId alone (no messageStore lookup). The participant is the
+   * engine-dialect self JID (`<me>@s.whatsapp.net`). The revoke shape is empirically UNVERIFIED — the
+   * live spike only tested posting; if WhatsApp rejects it, fall back to EngineNotSupportedError.
+   */
+  async deleteStatus(statusId: string): Promise<void> {
+    this.ensureReady();
+    await this.sock!.sendMessage('status@broadcast', {
+      delete: {
+        remoteJid: 'status@broadcast',
+        fromMe: true,
+        id: statusId,
+        participant: this.sessionStore.toEngineJid(this.normalizedSelfJid()),
+      },
+    });
   }
   getCatalog(): Promise<Catalog | null> {
     return this.unsupported('getCatalog');
