@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Disappearing-messages support (Baileys engine).** Outbound messages now honor a chat's disappearing-messages timer: the Baileys adapter reads the chat's cached `ephemeralExpiration` and sets it on each send (text, media, and replies), so recipients no longer see _"This message won't disappear — the sender may be using an older version of WhatsApp."_ The timer is applied only when a positive value is known for the chat; when it's unknown, disabled, or not yet synced, the per-message expiration is omitted, exactly as before. Reactions, deletes/revokes, and status posts are unaffected. Thanks @ulises2k for the report. (#473)
+- **Durable dead-letter record for failed webhook deliveries.** A webhook delivery that permanently fails — exhausting its retries or being rejected before it is sent — is now persisted to a new `webhook_delivery_failures` table instead of disappearing when its job is evicted from the queue. Operators can review the recorded failures (endpoint, event, status, error, attempts) through a new admin endpoint, `GET /webhooks/delivery-failures`. (#520)
 
 ### Fixed
 
