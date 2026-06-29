@@ -7,9 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.12] - 2026-06-29
+
 ### Added
 
 - **Brazilian Portuguese (pt-BR) locale.** The dashboard is now available in Português (Brasil) — all 9 navigation sections, toasts, dialogs, and form labels are translated. Select it from the language picker on the login screen or the sidebar. Thanks @A831ARD0.
+
+### Fixed
+
+- **The engine fallback no longer silently starts the wrong engine.** If the configured engine (`ENGINE_TYPE`, e.g. `baileys`) is unavailable and the legacy direct-creation fallback is reached, it now fails with a clear error instead of silently constructing the whatsapp-web.js adapter. (#527)
+
+### Security
+
+- **Application logs redact secret-valued metadata.** The values of secret-named log fields (`password`, `secret`, `token`, `api-key`, `authorization`, `credential`, `pepper`, `private-key`) are replaced with `[REDACTED]` before a line is written — defense-in-depth so a stray log statement can't leak a credential. (#527)
 
 ### Performance
 
