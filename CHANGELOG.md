@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Contact-card names escape vCard structural characters.** A contact whose name contained a backslash, semicolon, or comma could alter the structure of the generated vCard's `FN` field; those characters are now escaped per the vCard spec, complementing the existing CR/LF stripping. (#545)
+- **Request inputs are bounded against oversized payloads.** Several endpoints accepted unbounded strings or arrays: bulk message `text`/`caption` now match the single-send caps (4096 / 1024), bulk `variables` must be an object, the `mentions` array is capped in size and per-entry length, group name/subject/description, status text/caption, contact name/number, reply text, and reaction emoji now have length limits, and `POST /infra/storage/import` validates its body through a DTO so the global whitelist applies. (#545)
+
+### Fixed
+
+- **The audit-log listing rejects a negative offset.** `GET /audit?offset=-N` previously passed a negative skip to the query driver; the offset is now clamped to a non-negative value. (#545)
 - **API-key lifecycle operations are now recorded in the audit log.** Creating, deleting, and revoking an API key previously left no audit entry (only failed authentication was logged). Each now writes an `api_key_created` / `api_key_deleted` / `api_key_revoked` event with the acting admin key, the client IP, and the target key — giving administrators a forensic trail for credential management. (#546)
 
 ### Fixed
