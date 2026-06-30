@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Incoming call messages show their real detail in the dashboard.** Call detail (`video` / `missed`) is now attached on the live whatsapp-web.js inbound path — as it already was on history — so an incoming call renders a specific labeled bubble instead of a generic "Call". (#548)
+- **Location messages no longer dump a base64 thumbnail in the chat list.** Both the live dashboard handler and the engine's chat summary now show a "📍 Location" label as the last-message preview instead of the multi-KB base64 map thumbnail. (#548)
+- **Logs pagination can reach every page.** The numbered pager was frozen at pages 1–5 (pages 6+ were only reachable by repeated "Next" clicks and the active highlight was lost); it now slides a centered, clamped window around the current page. (#548)
+- **Message Tester clears the group selection when the session changes.** A stale group id from the previous session could otherwise be sent to; it is reset and re-seeded from the new session's groups. (#548)
+- **The media lightbox caption shows a formatted time** instead of a raw ISO timestamp. (#548)
+- **The "Create API key" button is disabled while the request is in flight** (and shows a spinner), preventing a double-submit. (#548)
+- **QR polling no longer churns its own interval.** The poll callback reads the latest sessions via a ref, so it keeps a stable identity instead of being torn down and restarted on every sessions update. (#548)
+- **Editing a webhook clears its message-filters when no message events remain selected**, matching the create path and the (hidden) filter UI. (#548)
+- **A session-status toast fires once per real transition.** A double-signalled WS `session.status` event no longer produces a duplicate toast (and redundant refresh); the handler compares against the current status before reacting. (#548)
 - **Dashboard chat media labels are localized.** The omitted-media placeholder and the chat image `alt` text were hardcoded English; both now use the `chats.media.*` translation keys, added across all 10 locales. (#547)
 - **Spanish template-test hint interpolates correctly again.** The `templates.noPlaceholders` string had its `{{name}}` interpolation token localized to `{{nombre}}`, which broke substitution; the token is restored while the surrounding prose stays Spanish. (#547)
 - **Arabic and Hebrew filter-count badges use the correct plural form.** The `webhooks.filters.badge` count was missing the required CLDR plural categories for Arabic (zero/two/few/many) and Hebrew (two), so i18next fell back to the singular noun; the missing forms are now provided. (#547)
