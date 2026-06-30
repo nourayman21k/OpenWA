@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.15] - 2026-06-30
+
 ### Added
 
 - **Inbound @mentions are surfaced on the Baileys engine.** An incoming message that tags participants now exposes the tagged WIDs as `mentionedIds` (normalized to the neutral `@c.us` convention), reaching parity with the whatsapp-web.js engine and feeding the existing `mentions` webhook filter and command-targeting. (#542)
