@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.18] - 2026-07-02
+
 ### Added
 
 - **Stats endpoint now returns chat names in top chats.** The `GET /stats/messages` and `GET /sessions/:id/stats` endpoints include a `chatName` field on each top-chat entry, populated from the contact's pushName or saved name at message time. The dashboard uses it to show readable names instead of raw JIDs. Existing rows start as `NULL` until a new message sets the name. (#558) Thanks @buluma.
