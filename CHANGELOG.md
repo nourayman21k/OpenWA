@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-02
+
+### Added
+
+- **Integration Fabric: provision and connect external services to WhatsApp sessions.** ADMIN operators can mint per-plugin instances — one per external account — through a provisioning API and a new dashboard **Instances** tab, each with its own HMAC-verified inbound webhook endpoint, operator-set secret, and per-session configuration. Integration plugins gain the capabilities needed to build a two-way bridge: `ctx.registerWebhook` to receive that inbound traffic, `ctx.mappings` to correlate a WhatsApp chat with an external conversation, a session-and-chat-scoped handover gate so a chat handed to a human is withheld from the owning plugin while the bot and other plugins still receive it, and `net.allowConfigHosts` to permit an outbound request to a host drawn from the instance's own configuration. This is the foundation for provider adapters. (#568, #570, #571, #575, #585, #587, #588, #589)
+
 ### Fixed
 
 - **Replying to and forwarding to a LID-migrated contact no longer fail with HTTP 500 on the whatsapp-web.js engine.** These paths sent to the phone id (`@c.us`) like the original send bug (#573), so a contact WhatsApp had migrated to `@lid` rejected them with `No LID for user`. They now resolve the recipient the same way as a normal send (including the self-heal retry), and a forward reads back its delivered id from the resolved chat so delivery status still reconciles. (#583)
