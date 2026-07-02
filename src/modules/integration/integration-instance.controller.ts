@@ -41,6 +41,7 @@ export class IntegrationInstanceController {
       const inst = await this.instances.create(pluginId, dto.instanceId, {
         sessionScope: dto.sessionScope,
         verifyToken: dto.verifyToken,
+        secret: dto.secret,
         config: dto.config,
       });
       void this.audit.logInfo(AuditAction.INTEGRATION_INSTANCE_CREATED, {
@@ -122,7 +123,8 @@ export class IntegrationInstanceController {
   }
 
   private view(inst: PluginInstance, routes: string[], reveal: boolean): InstanceView {
-    const masked = reveal ? inst : this.instances.maskedView(inst);
+    const schema = this.loader.getPlugin(inst.pluginId)?.manifest.configSchema;
+    const masked = reveal ? inst : this.instances.maskedView(inst, schema);
     return {
       id: masked.id,
       pluginId: masked.pluginId,
