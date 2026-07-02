@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.19] - 2026-07-02
+
 ### Added
 
 - **Business messages WhatsApp masks on linked devices are now surfaced as a `masked` type instead of an empty bubble.** For some high-security business messages (e.g. enterprise OTPs), WhatsApp delivers only a bodyless placeholder to linked/companion devices — the actual text is withheld by design and is only readable on the primary phone. On the Baileys engine these previously arrived as `type: "unknown"` with a blank body, which looked like a parsing bug. They are now classified as `type: "masked"` (with an empty body) so the API, webhooks, and filters can distinguish them, and the dashboard shows a short notice explaining the message is only available on the primary phone. (#574) Thanks @crossgg.
