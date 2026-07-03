@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-07-03
+
 ### Added
 
 - **Plugins can canonicalize a chat id** via a new `ctx.engine.canonicalChatId(sessionId, chatId)` capability, gated by the `engine:read` permission like the other engine reads. It resolves a `@lid` privacy id to its stable `<phone>@c.us` form when the mapping is known (best-effort; an unresolved id passes through), letting a plugin key a chat by one identity across WhatsApp's `@lid` migration. This is the host-side prerequisite for an adapter to keep a contact's conversation from splitting when they migrate to `@lid`. (#615)
