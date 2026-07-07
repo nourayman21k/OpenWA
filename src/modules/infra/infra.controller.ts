@@ -56,6 +56,7 @@ interface SaveConfigDto {
     username?: string;
     password?: string;
     database?: string;
+    schema?: string;
     poolSize?: number;
     sslEnabled?: boolean;
     sslRejectUnauthorized?: boolean;
@@ -207,6 +208,7 @@ interface SavedConfigResponse {
     port: string;
     username: string;
     database: string;
+    schema: string;
     poolSize: number;
     sslEnabled: boolean;
     sslRejectUnauthorized: boolean;
@@ -412,6 +414,7 @@ export class InfraController {
         port: saved.DATABASE_PORT || '',
         username: saved.DATABASE_USERNAME || '',
         database: saved.DATABASE_NAME || '',
+        schema: saved.POSTGRES_SCHEMA || 'public',
         poolSize: Number(saved.DATABASE_POOL_SIZE) || 10,
         sslEnabled: saved.DATABASE_SSL === 'true',
         sslRejectUnauthorized: saved.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false',
@@ -483,6 +486,10 @@ export class InfraController {
             updates.DATABASE_USERNAME = 'openwa';
             updates.DATABASE_PASSWORD = 'openwa';
             updates.DATABASE_NAME = 'openwa';
+            // Built-in Postgres is initialized with the default 'public' schema (see
+            // scripts/postgres-init-schema.sh). Pin it so a later switch from a custom-schema
+            // external DB to built-in doesn't carry a stale POSTGRES_SCHEMA forward.
+            updates.POSTGRES_SCHEMA = 'public';
             profiles.push('postgres');
           } else {
             // External PostgreSQL
@@ -491,6 +498,7 @@ export class InfraController {
             updates.DATABASE_USERNAME = config.database.username || 'postgres';
             setSecret('DATABASE_PASSWORD', config.database.password);
             updates.DATABASE_NAME = config.database.database || 'openwa';
+            updates.POSTGRES_SCHEMA = config.database.schema || 'public';
           }
           updates.DATABASE_POOL_SIZE = String(config.database.poolSize || 10);
           updates.DATABASE_SSL = config.database.sslEnabled ? 'true' : 'false';
@@ -511,6 +519,7 @@ export class InfraController {
             'DATABASE_POOL_SIZE',
             'DATABASE_SSL',
             'DATABASE_SSL_REJECT_UNAUTHORIZED',
+            'POSTGRES_SCHEMA',
           ]) {
             staleKeys.add(k);
           }

@@ -172,6 +172,61 @@ describe('InfraController.saveConfig SSL reject-unauthorized', () => {
   });
 });
 
+describe('InfraController PostgreSQL schema (POSTGRES_SCHEMA)', () => {
+  const newController = () =>
+    new InfraController(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+  function written(config: unknown, existing?: string): string {
+    (fs.existsSync as jest.Mock).mockReturnValue(existing !== undefined);
+    (fs.readFileSync as jest.Mock).mockReturnValue(existing ?? '');
+    (fs.writeFileSync as jest.Mock).mockClear();
+    newController().saveConfig(config as never);
+    const content = ((fs.writeFileSync as jest.Mock).mock.calls as Array<[string, string]>)[0][1];
+    (fs.existsSync as jest.Mock).mockReturnValue(false);
+    (fs.readFileSync as jest.Mock).mockReturnValue('');
+    return content;
+  }
+
+  it('writes POSTGRES_SCHEMA for external Postgres', () => {
+    const env = written({ database: { type: 'postgres', builtIn: false, host: 'db', schema: 'openwa' } });
+    expect(env).toContain('POSTGRES_SCHEMA=openwa');
+  });
+
+  it('defaults POSTGRES_SCHEMA to public for external Postgres when no schema is provided', () => {
+    const env = written({ database: { type: 'postgres', builtIn: false, host: 'db' } });
+    expect(env).toContain('POSTGRES_SCHEMA=public');
+  });
+
+  it('pins POSTGRES_SCHEMA=public for the built-in Postgres container', () => {
+    const env = written({ database: { type: 'postgres', builtIn: true } });
+    expect(env).toContain('POSTGRES_SCHEMA=public');
+  });
+
+  it('does not write POSTGRES_SCHEMA for sqlite', () => {
+    const env = written({ database: { type: 'sqlite' } });
+    expect(env).not.toContain('POSTGRES_SCHEMA=');
+  });
+
+  it('getConfig surfaces the saved POSTGRES_SCHEMA, defaulting to public', () => {
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+    (fs.readFileSync as jest.Mock).mockReturnValue('DATABASE_TYPE=postgres\nPOSTGRES_SCHEMA=openwa\n');
+    expect(newController().getConfig().database.schema).toBe('openwa');
+    (fs.readFileSync as jest.Mock).mockReturnValue('DATABASE_TYPE=postgres\n');
+    expect(newController().getConfig().database.schema).toBe('public');
+    (fs.existsSync as jest.Mock).mockReturnValue(false);
+    (fs.readFileSync as jest.Mock).mockReturnValue('');
+  });
+});
+
 describe('InfraController.saveConfig writes the generated env owner-only', () => {
   // data/.env.generated holds DB/S3/Redis credentials, so it must be written 0600 — not the
   // default 0644 (world-readable). The write must go through the same owner-only path the
@@ -258,13 +313,15 @@ describe('InfraController.saveConfig env-name correctness and merge (#226)', () 
     expect(env).toContain('DATABASE_HOST=db');
   });
 
-  it('drops stale postgres keys when switching to sqlite', () => {
-    const existing = 'DATABASE_TYPE=postgres\nDATABASE_HOST=oldhost\nDATABASE_PASSWORD=secret\nDATABASE_PORT=5432\n';
+  it('drops stale postgres keys (including POSTGRES_SCHEMA) when switching to sqlite', () => {
+    const existing =
+      'DATABASE_TYPE=postgres\nDATABASE_HOST=oldhost\nDATABASE_PASSWORD=secret\nDATABASE_PORT=5432\nPOSTGRES_SCHEMA=openwa\n';
     const env = written({ database: { type: 'sqlite' } }, existing);
     expect(env).toContain('DATABASE_TYPE=sqlite');
     expect(env).not.toContain('DATABASE_HOST=');
     expect(env).not.toContain('DATABASE_PASSWORD=');
     expect(env).not.toContain('DATABASE_PORT=');
+    expect(env).not.toContain('POSTGRES_SCHEMA=');
   });
 
   it('drops stale S3 keys when switching storage to local', () => {

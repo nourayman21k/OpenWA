@@ -16,14 +16,20 @@ const { DataSource } = require('typeorm');
 const APP_GENERATED_ID_TABLES = ['ingress_events', 'plugin_instances'];
 
 async function main() {
+  // Mirror the migration CLI (data-source.ts): a non-public POSTGRES_SCHEMA sets the session
+  // search_path so the raw, unqualified migration DDL + the typeorm_migrations ledger land in it.
+  const schema = process.env.POSTGRES_SCHEMA || 'public';
+  const useCustomSearchPath = schema !== 'public';
   const ds = new DataSource({
     type: 'postgres',
+    schema,
     host: process.env.DATABASE_HOST || 'localhost',
     port: Number(process.env.DATABASE_PORT || 5432),
     username: process.env.DATABASE_USERNAME || 'openwa',
     password: process.env.DATABASE_PASSWORD || 'openwa',
     database: process.env.DATABASE_NAME || 'openwa',
     migrations: [path.join(__dirname, '..', 'dist', 'database', 'migrations', '*.js')],
+    ...(useCustomSearchPath ? { extra: { options: `-c search_path=${schema},public` } } : {}),
   });
 
   await ds.initialize();
@@ -34,7 +40,8 @@ async function main() {
   // missing gen_random_uuid(). This catches current AND future tables without a maintained list.
   const noDefaultRows = await ds.query(
     `SELECT table_name FROM information_schema.columns
-     WHERE table_schema = 'public' AND column_name = 'id' AND column_default IS NULL`,
+     WHERE table_schema = $1 AND column_name = 'id' AND column_default IS NULL`,
+    [schema],
   );
   const offenders = noDefaultRows
     .map((r) => r.table_name)
@@ -43,8 +50,8 @@ async function main() {
   // Belt-and-suspenders: positively assert the two tables this migration set fixes carry a default.
   for (const t of ['conversation_mappings', 'integration_delivery_failures']) {
     const rows = await ds.query(
-      `SELECT column_default FROM information_schema.columns WHERE table_name = $1 AND column_name = 'id'`,
-      [t],
+      `SELECT column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = 'id'`,
+      [schema, t],
     );
     if (!rows.length || rows[0].column_default == null) offenders.push(`${t} (expected a default, found none)`);
   }

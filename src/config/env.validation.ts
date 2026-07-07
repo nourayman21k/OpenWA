@@ -45,6 +45,19 @@ export function validateEnv(config: EnvConfig): EnvConfig {
         errors.push(`${key} is required when DATABASE_TYPE=postgres`);
       }
     }
+    // POSTGRES_SCHEMA is optional (defaults to 'public' in configuration.ts). When set, validate it
+    // is a legal, non-reserved Postgres identifier so a typo / injection-ish value fails fast at boot
+    // rather than reaching CREATE TABLE "<schema>"."..." (or a search_path SET) at migration time.
+    const pgSchema = str('POSTGRES_SCHEMA');
+    if (pgSchema !== undefined) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(pgSchema)) {
+        errors.push(
+          `POSTGRES_SCHEMA must be a valid Postgres identifier (a letter or underscore, then letters/digits/underscores, max 63 chars; got ${JSON.stringify(pgSchema)})`,
+        );
+      } else if (pgSchema.toLowerCase().startsWith('pg_')) {
+        errors.push(`POSTGRES_SCHEMA must not use the reserved "pg_" prefix (got ${JSON.stringify(pgSchema)})`);
+      }
+    }
   } else {
     // SQLite (explicit or default): DATABASE_NAME is a file path for the 'data' connection. It must
     // not resolve to the 'main' DB file — two TypeORM connections on one SQLite file run separate

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Opt-in `VALIDATION_ERROR_DETAIL`** exposes field-level validation error messages on `400` responses (hidden by default in production, where a bad request otherwise returns a generic message so the DTO shape isn't reflected back). Set it to `true` to debug an SDK/integration against a production instance without flipping `NODE_ENV`, or `false` to force it off everywhere.
+- **PostgreSQL schema selection via `POSTGRES_SCHEMA`.** OpenWA's tables and the TypeORM migration ledger can now be placed in a dedicated Postgres schema (default `public` preserves historical behavior). Set `POSTGRES_SCHEMA` to isolate OpenWA from other apps sharing a database, or to use a managed-Postgres project schema. The schema must already exist (the built-in container creates it; for external Postgres run `CREATE SCHEMA <name>;` once). SQLite ignores this setting. The dashboard Infrastructure page exposes the field, and the environment variable is validated as a legal, non-reserved Postgres identifier at boot.
 
 ### Changed
 

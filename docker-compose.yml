@@ -99,6 +99,9 @@ services:
       # No committed default secret; blank unless the operator sets it (built-in Postgres is provisioned
       # with its own credentials by the orchestrator, not via this line).
       - DATABASE_PASSWORD=${DATABASE_PASSWORD:-}
+      # PostgreSQL schema (blank-forwarded like the other DATABASE_* keys so a dashboard-saved
+      # POSTGRES_SCHEMA in data/.env.generated applies; a real host value pins). Ignored for sqlite.
+      - POSTGRES_SCHEMA=${POSTGRES_SCHEMA:-}
       - DATABASE_SYNCHRONIZE=${DATABASE_SYNCHRONIZE:-false}
       # Engine. Forwarded empty by default so the dashboard (Infrastructure > Engine) selects the
       # active engine via data/.env.generated (defaults to whatsapp-web.js); main.ts treats a blank
@@ -199,8 +202,16 @@ services:
       # production boot guard rejects empty/placeholder secrets before startup.
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-}
       POSTGRES_DB: ${DATABASE_NAME:-openwa}
+      # PostgreSQL schema for OpenWA's tables + migration ledger. Default 'public'. The init
+      # script below creates the schema (if non-public) and sets the database default search_path,
+      # so the built-in container works zero-config with a custom schema. Ignored when 'public'.
+      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-public}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Runs only on first init (postgres image docker-entrypoint-initdb.d semantics): creates the
+      # configured schema and sets the DB default search_path. No-op for 'public'; does not re-run
+      # on an already-initialized volume (see the note in scripts/postgres-init-schema.sh).
+      - ./scripts/postgres-init-schema.sh:/docker-entrypoint-initdb.d/01-create-schema.sh:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${DATABASE_USERNAME:-openwa}']
       interval: 5s

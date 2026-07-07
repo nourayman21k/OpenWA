@@ -18,6 +18,25 @@ describe('validateEnv', () => {
     ).not.toThrow();
   });
 
+  it('validates POSTGRES_SCHEMA as a legal, non-reserved Postgres identifier when set', () => {
+    const pg = { DATABASE_TYPE: 'postgres', DATABASE_HOST: 'db', DATABASE_USERNAME: 'u', DATABASE_PASSWORD: 'p' };
+    // unset / 'public' (default) and ordinary identifiers are fine
+    expect(() => validateEnv({ ...pg })).not.toThrow();
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: 'public' })).not.toThrow();
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: 'openwa' })).not.toThrow();
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: 'my_app_2' })).not.toThrow();
+    // invalid identifier characters (would reach CREATE TABLE "<schema>"."..." or a search_path SET)
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: 'openwa; DROP' })).toThrow(/POSTGRES_SCHEMA/);
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: '1bad' })).toThrow(/POSTGRES_SCHEMA/);
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: 'has space' })).toThrow(/POSTGRES_SCHEMA/);
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: 'a.b' })).toThrow(/POSTGRES_SCHEMA/);
+    // reserved pg_ prefix rejected (case-insensitive)
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: 'pg_catalog' })).toThrow(/POSTGRES_SCHEMA/);
+    expect(() => validateEnv({ ...pg, POSTGRES_SCHEMA: 'Pg_temp' })).toThrow(/POSTGRES_SCHEMA/);
+    // ignored for sqlite: a bogus value must NOT trip when not on postgres
+    expect(() => validateEnv({ DATABASE_TYPE: 'sqlite', POSTGRES_SCHEMA: '1bad' })).not.toThrow();
+  });
+
   it('rejects a non-integer / out-of-range port', () => {
     expect(() => validateEnv({ DATABASE_PORT: 'abc' })).toThrow(/DATABASE_PORT/);
     expect(() => validateEnv({ PORT: '70000' })).toThrow(/PORT/);
