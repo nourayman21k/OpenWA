@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Debian Chromium SIGTRAP crash in Kubernetes.** The `Dockerfile` previously installed the OS-level `chromium` package from Debian 12. When run as a non-root user in strict Docker/Kubernetes environments, this package consistently crashed at startup with `Code: null` and `Trace/breakpoint trap (core dumped)`. On amd64 the `Dockerfile` now downloads **Chrome for Testing** via Puppeteer during the build phase (avoiding the Debian package's SIGTRAP); arm64 keeps Debian's `chromium`, since Chrome for Testing publishes no linux-arm64 build. Both resolve to a single `PUPPETEER_EXECUTABLE_PATH` symlink. This resolves the persistent browser launch failures on restricted environments without requiring insecure workarounds like `--no-zygote` or disabling Seccomp/AppArmor. Thanks @muhfalihr.
+
 ### Added
 
 - **Global message search across sessions.** `GET /api/search` finds messages across all sessions through an open `SearchProvider` contract, with a built-in database full-text provider (PostgreSQL `tsvector`/`GIN`, SQLite `FTS5`) as the zero-dependency default — no external service required. Search works out of the box on both SQLite and PostgreSQL and survives repeated dialect switching and export/import round-trips; a non-FTS5 SQLite build skips the index gracefully and the route returns `501` instead of crashing boot. Set `SEARCH_ENABLED=false` to disable the route and module entirely (the index is DB-maintained per-write regardless, at negligible in-process cost). Advanced backends (typo-tolerance, CJK word-segmentation, large-scale relevance) will be available as provider plugins.
