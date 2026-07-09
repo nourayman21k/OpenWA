@@ -728,7 +728,7 @@ describe('PluginLoaderService — search-provider worker-crash fallback', () => 
       onLog?: (level: PluginLogLevel, message: string, meta?: Record<string, unknown>) => void,
       runWithHookGuard?: (inFlightEvents: string[], run: () => Promise<unknown>) => Promise<unknown>,
       onSearchProviderRegister?: () => void,
-      onWorkerExit?: (code: number) => void,
+      onWorkerExit?: (code: number, intentional: boolean) => void,
     ): PluginWorkerHost {
       const host = new PluginWorkerHost(
         new WorkerThreadChannel({
