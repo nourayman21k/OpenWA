@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-07-08
+
 ### Fixed
 
 - **Debian Chromium SIGTRAP crash in Kubernetes.** The `Dockerfile` previously installed the OS-level `chromium` package from Debian 12. When run as a non-root user in strict Docker/Kubernetes environments, this package consistently crashed at startup with `Code: null` and `Trace/breakpoint trap (core dumped)`. On amd64 the `Dockerfile` now downloads **Chrome for Testing** via Puppeteer during the build phase (avoiding the Debian package's SIGTRAP); arm64 keeps Debian's `chromium`, since Chrome for Testing publishes no linux-arm64 build. Both resolve to a single `PUPPETEER_EXECUTABLE_PATH` symlink. This resolves the persistent browser launch failures on restricted environments without requiring insecure workarounds like `--no-zygote` or disabling Seccomp/AppArmor. Thanks @muhfalihr.
