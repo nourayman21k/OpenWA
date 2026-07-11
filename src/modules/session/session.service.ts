@@ -472,6 +472,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       // A fresh start intentionally (re-)creates the engine — clear any stale stop/delete mark.
       this.stoppingSessions.delete(id);
 
+      // Cancel any reconnect timer a prior failed executeReconnect left pending, BEFORE the awaited
+      // session:starting hook and engine init — otherwise the stale timer can fire during that I/O
+      // and destroy/replace the engine this start() is about to create (or orphan the Chromium
+      // process). Idempotent: a no-op when no reconnect state exists (the common fresh-start case).
+      this.cancelReconnect(id);
+
       // Execute hook before starting
       await this.hookManager.execute(
         'session:starting',

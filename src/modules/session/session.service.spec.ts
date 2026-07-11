@@ -672,6 +672,39 @@ describe('SessionService', () => {
     });
   });
 
+  describe('start() stale reconnect timer', () => {
+    it('cancels a pending reconnect timer before recreating the engine', async () => {
+      const i = service as unknown as {
+        reconnectStates: Map<
+          string,
+          { attempts: number; timer: NodeJS.Timeout | null; maxAttempts: number; baseDelay: number }
+        >;
+        cancelReconnect: (id: string) => void;
+      };
+      // Spy clearTimeout directly so the assertion pins that the stale HANDLE was actually cleared —
+      // not merely that cancelReconnect was reached (which would hold even if it forgot clearTimeout).
+      const clearTimeoutSpy = jest.spyOn(globalThis, 'clearTimeout');
+      const staleFired = jest.fn();
+      // Seed a pending reconnect timer exactly as a failed executeReconnect leaves behind.
+      // tsc resolves setTimeout to the DOM overload (number) in the spec context; force the field type.
+      const staleTimer = setTimeout(staleFired, 30000) as unknown as NodeJS.Timeout;
+      i.reconnectStates.set('sess-uuid-1', { attempts: 1, timer: staleTimer, maxAttempts: 5, baseDelay: 5000 });
+      (repository.findOne as jest.Mock).mockResolvedValue(createMockSession());
+
+      await service.start('sess-uuid-1');
+
+      // start() must cancel the stale timer so it can't later destroy/replace the engine start() just
+      // created (or orphan a Chromium process), then install a fresh reconnect state.
+      expect(staleFired).not.toHaveBeenCalled();
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(staleTimer);
+      const after = i.reconnectStates.get('sess-uuid-1');
+      expect(after?.timer).toBeNull();
+      expect(after?.attempts).toBe(0);
+      clearTimeout(staleTimer);
+      clearTimeoutSpy.mockRestore();
+    });
+  });
+
   describe('reconnect/stop race', () => {
     interface Internals {
       executeReconnect: (id: string, session: Session, state: unknown) => Promise<void>;
