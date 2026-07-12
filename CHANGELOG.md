@@ -114,6 +114,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Silent delivery failure for 1:1 Baileys sends to LID-migrated contacts (ack 463).** On the
+  Baileys engine, a 1:1 send addressed by phone (`<phone>@c.us` / `<phone>@s.whatsapp.net`) to a
+  contact WhatsApp has migrated to LID addressing was rejected server-side with ack error 463
+  (`NackCallerReachoutTimelocked` / "missing tctoken" — the privacy token is stored and honored
+  under the LID), while the same send addressed to the contact's `<lid>@lid` delivered. Because
+  Baileys generates the message id locally, the API still returned a `messageId`, so the
+  non-delivery was silent to the caller. The adapter now resolves phone-dialect 1:1 chat ids to
+  the contact's LID at the send boundary via `sock.signalRepository.lidMapping.getLIDForPN` (the
+  same mapping the Baileys send path consults), applied in `sendTextMessage`, `sendContent` (all
+  media/location/contact/poll sends), and `sendChatState`. Groups, broadcast, already-`@lid`, and
+  unmapped ids pass through unchanged (non-migrated contacts behave identically), and resolution
+  is best-effort: any lookup error falls back to the phone jid. The disappearing-timer lookup
+  still resolves under the LID, since `getEphemeralExpiration` already keys on the raw, engine,
+  and neutral forms of the jid. Thanks @isaacmendes. [#717]
+
 - **Diagnosable failure for a stale browser profile after a binary-changing upgrade.** Upgrading
   across the v0.8.12 amd64 browser-binary switch (Debian Chromium → Chrome for Testing, #663) — or any
   later change to the Chromium/Chrome binary — can leave an already-authenticated `whatsapp-web.js`
