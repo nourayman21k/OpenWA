@@ -309,12 +309,13 @@ jobs:
 
       - name: Resolve published image ref
         id: image
-        # metadata-action publishes the {{version}} tag (e.g. 0.8.16) from the v-prefixed git tag, so
-        # strip the leading "v" to match it. github.repository is trusted; the tag derives from the
-        # pushed git ref, not from untrusted input.
+        # metadata-action publishes the {{version}} tag (e.g. 0.8.17) from the v-prefixed git tag, so
+        # strip the leading "v" to match it. ${REPO,,} lowercases github.repository — GHCR normalizes
+        # the repo name to lowercase on push, and `docker run` rejects a mixed-case reference, so the
+        # pull target must be lowercase too (this repo is rmyndharis/OpenWA).
         env:
           REPO: ${{ github.repository }}
-        run: echo "ref=ghcr.io/${REPO}:${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        run: echo "ref=ghcr.io/${REPO,,}:${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Boot + liveness check on each architecture
         env:
