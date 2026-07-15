@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Send-response semantics clarified (docs only).** The send endpoints' Swagger response and `docs/06` now state explicitly that `201` means the gateway accepted the message for sending — not that the recipient received it — and that WhatsApp does not reject an unregistered recipient synchronously, so a message to a number that is not on WhatsApp still returns `201` with a `messageId` but never delivers. `GET /sessions/{id}/contacts/check/{number}` is cross-referenced as the way to pre-validate a new recipient, and the async message `status` lifecycle (`sent → delivered → read`, or `failed`) as the source of real delivery state. No behavior change. Refs #738.
 
 
+### Fixed
+
+- **Engine auth-timeout now returns a diagnostic 504 instead of a bare 500.** When the WhatsApp Web
+  engine's internal authentication poll exhausts its timeout (default 30s) — e.g. the session proxy
+  is unreachable, so the browser launches but no QR is ever delivered — `POST /api/sessions/:id/start`
+  previously let the primitive `'auth timeout'` string escape to NestJS's default handler as a
+  meaningless `500 Internal Server Error`. It now maps to `504 Gateway Timeout` with a message
+  pointing at the proxy / network-egress / firewall causes and the `WWEBJS_AUTH_TIMEOUT_MS` knob for
+  legitimately slow first boots. The outer engine-init hang deadline (`EngineInitTimeoutError`) still
+  surfaces as 500 and is tracked separately.
+
 ## [0.8.17] - 2026-07-13
 
 ### Added
