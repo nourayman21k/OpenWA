@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { InternalServerErrorException } from '@nestjs/common';
 import { Client, LocalAuth, MessageMedia, MessageTypes, WAState, type Message } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode';
 import * as path from 'path';
@@ -602,7 +603,11 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // so the message stays at SENT with only a misleading "no status row advanced" in the log. Drop
       // it here, where the reason is still visible. (Note this differs from the reaction path below,
       // where `findOne` DROPS an undefined key instead of nulling it and matches an arbitrary row.)
-      const ackId = (msg.id as unknown as SerializedWid | undefined)?._serialized;
+      // Read `$1` before giving up, as the send path does (#747): a build that renamed the field still
+      // has a perfectly good id here, and dropping it strands the message at SENT — including the
+      // `ack < 0` that is the only signal a send failed.
+      const rawId = msg.id as unknown as SerializedWid | undefined;
+      const ackId = rawId?._serialized ?? rawId?.$1;
       if (!ackId) {
         this.logger.warn('Dropping an ack whose message id could not be read', { ack });
         return;
@@ -1864,10 +1869,35 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return { id: id?._serialized ?? id?.$1 ?? '', timestamp: msg.timestamp };
   }
 
+  /**
+   * The status-post counterpart of `toMessageResult`, but its absent-message case is *narrower* than a
+   * send's. `Injected/Utils.js` builds the status model and returns it from the `isStatus` branch before
+   * ever reaching the `Msg.get` miss that makes an ordinary send ambiguous — so the only way back with no
+   * message is `Client.js`'s `if (!chat) return null`, i.e. nothing was posted at all. Not an ambiguity:
+   * a plain failure, which was previously dressed up as a `201` carrying a `new Date()` invented for a
+   * status that never existed.
+   *
+   * Thrown as an `InternalServerErrorException` rather than a bare `Error` because there is no global
+   * exception filter (see `message-not-found.error.spec.ts`), so a bare `Error` reaches the caller as
+   * `{"statusCode":500,"message":"Internal server error"}` — and unlike a send, which routes its message
+   * into the `message:failed` hook, HTTP is the only consumer a status post has. The same 500, with the
+   * reason surviving.
+   *
+   * A present `Message` proves the post happened, so an id it cannot read there carries the same empty
+   * sentinel `toMessageResult` uses. Read `$1` before falling back to it (#747): the sentinel means
+   * "posted, id unknown", and `deleteStatus` takes this id as the revoke handle — spending it on an id
+   * that was readable all along leaves a status nothing can revoke.
+   */
   private toStatusResult(msg: Message | undefined): StatusResult {
-    const ts = msg?.timestamp ? new Date(msg.timestamp * 1000) : new Date();
+    if (!msg) {
+      throw new InternalServerErrorException(
+        'the engine returned no message for this status post, so it may not have been published — check your status before retrying',
+      );
+    }
+    const id = msg.id as unknown as SerializedWid | undefined;
+    const ts = msg.timestamp ? new Date(msg.timestamp * 1000) : new Date();
     return {
-      statusId: msg?.id?._serialized ?? '',
+      statusId: id?._serialized ?? id?.$1 ?? '',
       timestamp: ts,
       expiresAt: new Date(ts.getTime() + 24 * 3_600_000),
     };

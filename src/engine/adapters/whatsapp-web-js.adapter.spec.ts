@@ -15,7 +15,7 @@ import {
 import { getEffectiveWebVersionInfo, resolveWebVersionPin, __resetWebVersionCache } from '../wa-web-version';
 import * as fs from 'fs';
 import * as qrcode from 'qrcode';
-import { UnprocessableEntityException } from '@nestjs/common';
+import { InternalServerErrorException, UnprocessableEntityException } from '@nestjs/common';
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
@@ -1121,6 +1121,38 @@ describe('WhatsAppWebJsAdapter status methods', () => {
     },
   );
 
+  it('postTextStatus reads a renamed `$1` id when the dependency has not normalized it', async () => {
+    // The id is right there — spending the "posted, id unknown" sentinel on it would hand the caller a
+    // statusId that deleteStatus can never revoke, for a status that really is live.
+    const sendMessage = jest.fn().mockResolvedValue({ id: { $1: 'STATUS_RENAMED' }, timestamp: 1700000012 });
+    const result = await readyAdapter({ sendMessage }).postTextStatus('hello', options);
+    expect(result.statusId).toBe('STATUS_RENAMED');
+  });
+
+  it('postTextStatus reports an unreadable id as posted-id-unknown rather than inventing one', async () => {
+    const sendMessage = jest.fn().mockResolvedValue({ id: { someFutureName: 'X' }, timestamp: 1700000013 });
+    const result = await readyAdapter({ sendMessage }).postTextStatus('hello', options);
+    // A Message came back, so the post itself is proven — only the id is unreadable.
+    expect(result.statusId).toBe('');
+  });
+
+  it.each([['postTextStatus'], ['postImageStatus'], ['postVideoStatus']] as const)(
+    '%s fails rather than claim a status that may never have been published',
+    async method => {
+      // whatsapp-web.js resolves undefined when the chat could not be resolved — nothing was posted.
+      // Returning a 201 with a fabricated timestamp here is unrecoverable; a visible failure is not.
+      const sendMessage = jest.fn().mockResolvedValue(undefined);
+      const adapter = readyAdapter({ sendMessage });
+      const call =
+        method === 'postTextStatus' ? adapter.postTextStatus('hello', options) : adapter[method](media, options);
+      // Assert the TYPE, not just the text: a bare Error is a 500 whose body says only "Internal server
+      // error" (no global filter — see message-not-found.error.spec.ts), which would silently discard
+      // the reason this throw exists to deliver.
+      await expect(call).rejects.toBeInstanceOf(InternalServerErrorException);
+      await expect(call).rejects.toThrow(/may not have been published/);
+    },
+  );
+
   it('deleteStatus revokes via client.revokeStatusMessage(statusId)', async () => {
     const revokeStatusMessage = jest.fn().mockResolvedValue(undefined);
     await readyAdapter({ sendMessage: jest.fn(), revokeStatusMessage }).deleteStatus('STATUS1');
@@ -2086,6 +2118,16 @@ describe('WhatsAppWebJsAdapter message_ack (unreadable id)', () => {
     client.emit('message_ack', { id: { _serialized: 'ACKED_MSG' } }, 3);
 
     expect(onMessageAck).toHaveBeenCalledWith('ACKED_MSG', expect.any(String));
+  });
+
+  it('reads a renamed `$1` id when the dependency has not normalized it', () => {
+    // The send path recovers from the rename; the ack path must too, or a message sent on an unpatched
+    // build can never leave SENT — including via `ack < 0`, the one signal that it failed outright.
+    const { onMessageAck, client } = wireAckHandler();
+
+    client.emit('message_ack', { id: { $1: 'ACKED_RENAMED' } }, 3);
+
+    expect(onMessageAck).toHaveBeenCalledWith('ACKED_RENAMED', expect.any(String));
   });
 
   it('drops an ack whose id cannot be read instead of passing undefined on', () => {
