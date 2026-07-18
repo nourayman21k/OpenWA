@@ -381,6 +381,25 @@ export interface RevokedMessage {
   timestamp: number;
 }
 
+export interface EditedMessage {
+  messageId: string;
+  chatId: string;
+  body: string;
+  senderId: string;
+  from: string;
+  to: string;
+  fromMe: boolean;
+  isGroup: boolean;
+  type: MessageType;
+  hasMedia: boolean;
+  /** For group messages, the participant that authored the edited message. */
+  author?: string;
+  /** WIDs mentioned by the edited message's latest content. */
+  mentionedIds?: string[];
+  /** Unix seconds when the edit occurred (not the original message creation time). */
+  timestamp: number;
+}
+
 export interface ReactionEvent {
   messageId: string;
   chatId: string;
@@ -404,6 +423,7 @@ export interface EngineEventCallbacks {
   onMessageAck?: (messageId: string, status: DeliveryStatus) => void;
   onMessageRevoked?: (message: RevokedMessage) => void;
   onMessageReaction?: (event: ReactionEvent) => void;
+  onMessageEdited?: (message: EditedMessage) => void;
   /**
    * Bulk historical messages from an engine's initial sync (e.g. Baileys `messaging-history.set`).
    * They predate the live session, so consumers persist them for the chat view but must not dispatch.

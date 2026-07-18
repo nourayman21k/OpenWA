@@ -26,7 +26,12 @@ import {
   type MessageType,
   type SearchHit,
 } from '../services/api';
-import { mergeDeliveryStatus, findRevokedIndex, type ChatMessageView } from '../utils/chatMessages';
+import {
+  applyMessageEdit,
+  mergeDeliveryStatus,
+  findRevokedIndex,
+  type ChatMessageView,
+} from '../utils/chatMessages';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useRole } from '../hooks/useRole';
@@ -352,11 +357,48 @@ export function Chats() {
     [selectedSessionId, queryClient],
   );
 
+  const handleIncomingMessageEdited = useCallback(
+    (event: { sessionId: string; messageId: string; chatId: string; body: string }) => {
+      if (event.sessionId !== selectedSessionId) return;
+
+      const caches = queryClient.getQueriesData<ChatMessageView[]>({
+        queryKey: ['messages', event.sessionId],
+      });
+      let matchedCachedMessage = false;
+      let editedLastMessage = false;
+      for (const [key, list] of caches) {
+        if (!list) continue;
+        const next = applyMessageEdit(list, event);
+        if (next === list) continue;
+        matchedCachedMessage = true;
+        queryClient.setQueryData(key, next);
+
+        // Message caches are chronological; only editing the final row changes the sidebar preview.
+        // Confirm the cache belongs to the event chat before touching that summary.
+        const cachedChatId = Array.isArray(key) && typeof key[2] === 'string' ? key[2] : undefined;
+        const editedIndex = list.findIndex(m => m.id === event.messageId || m.waMessageId === event.messageId);
+        if (cachedChatId === event.chatId && editedIndex === list.length - 1) editedLastMessage = true;
+      }
+      if (editedLastMessage) {
+        setChats(previous =>
+          previous.map(chat => (chat.id === event.chatId ? { ...chat, lastMessage: event.body } : chat)),
+        );
+      } else if (!matchedCachedMessage) {
+        // The chat may never have been opened, so there is no message cache from which to prove
+        // whether this was its latest row. Refresh summaries instead of guessing and overwriting the
+        // sidebar with the body of an older edited message.
+        void loadChats(selectedSessionId);
+      }
+    },
+    [selectedSessionId, queryClient, loadChats],
+  );
+
   const { isConnected, connectionFailed, reconnect, subscribe, unsubscribe } = useWebSocket({
     onMessage: handleIncomingMessage,
     onMessageAck: handleIncomingMessageAck,
     onMessageReaction: handleIncomingMessageReaction,
     onMessageRevoked: handleIncomingMessageRevoked,
+    onMessageEdited: handleIncomingMessageEdited,
   });
 
   // A transient WebSocket gap means message.received/ack/revoke events were missed, and the chat
@@ -386,6 +428,7 @@ export function Chats() {
         'message.ack',
         'message.reaction',
         'message.revoked',
+        'message.edited',
       ]);
       return () => {
         unsubscribe(selectedSessionId);

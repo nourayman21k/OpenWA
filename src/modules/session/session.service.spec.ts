@@ -119,6 +119,7 @@ describe('SessionService', () => {
       emitMessageAck: jest.fn(),
       emitMessageRevoked: jest.fn(),
       emitMessageReaction: jest.fn(),
+      emitMessageEdited: jest.fn(),
       emitQRCode: jest.fn(),
     };
 
@@ -1533,7 +1534,7 @@ describe('SessionService', () => {
 
       for (let i = 0; i < 3; i++) await flush();
 
-      const chains = (service as unknown as { reactionChains: Map<string, unknown> }).reactionChains;
+      const chains = (service as unknown as { messageMutationChains: Map<string, unknown> }).messageMutationChains;
       expect(chains.size).toBe(0);
     });
 
@@ -2590,6 +2591,127 @@ describe('SessionService', () => {
       const revokedCall = (eventsGateway.emitMessageRevoked as jest.Mock).mock.calls[0] as unknown[];
       const emittedPayload = revokedCall[1] as { body: string };
       expect(emittedPayload.body).toBe('');
+    });
+  });
+
+  // ── onMessageEdited ───────────────────────────────────────────────
+
+  describe('onMessageEdited callback', () => {
+    const startAndCaptureEditCallback = async (): Promise<NonNullable<EngineEventCallbacks['onMessageEdited']>> => {
+      const session = createMockSession();
+      (repository.findOne as jest.Mock).mockResolvedValue(session);
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
+      await service.start('sess-uuid-1');
+      const initializeCall = mockEngine.initialize.mock.calls[0] as unknown[];
+      const callbacks = initializeCall[0] as EngineEventCallbacks;
+      return callbacks.onMessageEdited!;
+    };
+
+    const edited = (body = 'New edited text') => ({
+      messageId: 'WA_MSG_EDIT_1',
+      chatId: '123@c.us',
+      body,
+      senderId: '123@c.us',
+      from: '123@c.us',
+      to: '456@c.us',
+      fromMe: false,
+      isGroup: false,
+      type: 'text' as const,
+      hasMedia: false,
+      timestamp: 1700000005,
+    });
+
+    it('persists the body before emitting the WebSocket and webhook event', async () => {
+      let releaseUpdate!: () => void;
+      (messageRepository.update as jest.Mock).mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            releaseUpdate = () => resolve({ affected: 1 });
+          }),
+      );
+      const onMessageEdited = await startAndCaptureEditCallback();
+
+      onMessageEdited(edited());
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(messageRepository.update).toHaveBeenCalledWith(
+        { sessionId: 'sess-uuid-1', waMessageId: 'WA_MSG_EDIT_1' },
+        { body: 'New edited text' },
+      );
+      expect(eventsGateway.emitMessageEdited).not.toHaveBeenCalled();
+      expect(webhookService.dispatch).not.toHaveBeenCalledWith('sess-uuid-1', 'message.edited', expect.anything());
+
+      releaseUpdate();
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(webhookService.dispatch).toHaveBeenCalledWith(
+        'sess-uuid-1',
+        'message.edited',
+        expect.objectContaining({
+          messageId: 'WA_MSG_EDIT_1',
+          body: 'New edited text',
+        }),
+      );
+
+      expect(eventsGateway.emitMessageEdited).toHaveBeenCalledWith(
+        'sess-uuid-1',
+        expect.objectContaining({
+          messageId: 'WA_MSG_EDIT_1',
+          body: 'New edited text',
+        }),
+      );
+    });
+
+    it('serializes rapid edits so the latest body cannot be overwritten by an older slow update', async () => {
+      const releases: Array<() => void> = [];
+      (messageRepository.update as jest.Mock).mockImplementation(
+        () =>
+          new Promise(resolve => {
+            releases.push(() => resolve({ affected: 1 }));
+          }),
+      );
+      const onMessageEdited = await startAndCaptureEditCallback();
+
+      onMessageEdited(edited('first edit'));
+      onMessageEdited(edited('second edit'));
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(messageRepository.update).toHaveBeenCalledTimes(1);
+      expect(eventsGateway.emitMessageEdited).not.toHaveBeenCalled();
+
+      releases[0]();
+      await new Promise(resolve => setImmediate(resolve));
+      expect(messageRepository.update).toHaveBeenCalledTimes(2);
+      expect(eventsGateway.emitMessageEdited).toHaveBeenCalledTimes(1);
+
+      releases[1]();
+      await new Promise(resolve => setImmediate(resolve));
+      const payloads = (eventsGateway.emitMessageEdited as jest.Mock).mock.calls.map(
+        call => (call as [string, { body: string }])[1].body,
+      );
+      expect(payloads).toEqual(['first edit', 'second edit']);
+    });
+
+    it('drops an edit with no target id before any persistence or notification', async () => {
+      const onMessageEdited = await startAndCaptureEditCallback();
+
+      onMessageEdited({ ...edited(), messageId: '' });
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(messageRepository.update).not.toHaveBeenCalled();
+      expect(eventsGateway.emitMessageEdited).not.toHaveBeenCalled();
+      expect(webhookService.dispatch).not.toHaveBeenCalledWith('sess-uuid-1', 'message.edited', expect.anything());
+    });
+
+    it('still reports a real edit occurrence when the best-effort database update fails', async () => {
+      (messageRepository.update as jest.Mock).mockRejectedValueOnce(new Error('database unavailable'));
+      const onMessageEdited = await startAndCaptureEditCallback();
+
+      onMessageEdited(edited());
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(eventsGateway.emitMessageEdited).toHaveBeenCalledTimes(1);
+      expect(webhookService.dispatch).toHaveBeenCalledWith('sess-uuid-1', 'message.edited', edited());
     });
   });
 

@@ -36,6 +36,7 @@ import {
   DeliveryStatus,
   IncomingMessage,
   ReactionEvent,
+  EditedMessage,
 } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
 import { ShutdownService } from '../../common/services/shutdown.service';
@@ -169,10 +170,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
   // awaited hook and orphan an engine the lifecycle could never destroy.
   private initializingSessions: Set<string> = new Set();
 
-  // Serializes the read-modify-write of a message's reactions map per `${sessionId}:${waMessageId}`,
-  // so two concurrent reaction events on the same message don't clobber each other (both read the
-  // same snapshot, both full-row save, last writer wins). Entries are deleted once their chain drains.
-  private reactionChains: Map<string, Promise<void>> = new Map();
+  // Serializes stored-message mutations per `${sessionId}:${waMessageId}`. Reactions perform a
+  // read-modify-write and rapid edits must remain latest-write-wins; sharing one chain also preserves
+  // order when different mutation kinds for the same message arrive together.
+  private messageMutationChains: Map<string, Promise<void>> = new Map();
 
   constructor(
     @InjectRepository(Session, 'data')
@@ -1082,24 +1083,37 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       },
       onMessageReaction: (event): void => {
         if (!this.isLiveEngine(id, engine)) return;
+        if (!event.messageId) {
+          this.logger.warn('Ignoring message reaction without a target message id', {
+            sessionId: id,
+            action: 'message_reaction_ignored',
+          });
+          return;
+        }
         this.logger.debug(`Message reaction received: ${event.messageId} -> ${event.reaction}`, {
           sessionId: id,
           messageId: event.messageId,
           action: 'message_reaction_received',
         });
 
-        // Serialize per message so two concurrent reactions don't read the same snapshot and clobber
-        // each other on the full-row save. A prior chain's failure must not block later reactions.
-        const key = `${id}:${event.messageId}`;
-        const prior = this.reactionChains.get(key) ?? Promise.resolve();
-        const next = prior.catch(() => undefined).then(() => this.applyReaction(id, event));
-        this.reactionChains.set(key, next);
-        void next.finally(() => {
-          // Clean up only if no newer reaction chained after us, so the map can't leak per message.
-          if (this.reactionChains.get(key) === next) {
-            this.reactionChains.delete(key);
-          }
+        this.enqueueMessageMutation(id, event.messageId, () => this.applyReaction(id, event));
+      },
+      onMessageEdited: (message): void => {
+        if (!this.isLiveEngine(id, engine)) return;
+        if (!message.messageId) {
+          this.logger.warn('Ignoring message edit without a target message id', {
+            sessionId: id,
+            action: 'message_edit_ignored',
+          });
+          return;
+        }
+        this.logger.debug(`Message edited: ${message.messageId}`, {
+          sessionId: id,
+          messageId: message.messageId,
+          action: 'message_edited',
         });
+
+        this.enqueueMessageMutation(id, message.messageId, () => this.applyMessageEdit(id, message));
       },
       onDisconnected: (reason: string): void => {
         if (!this.isLiveEngine(id, engine)) return;
@@ -1278,7 +1292,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       metadata.reactions = reactions;
       // Scoped update of ONLY the metadata column. A full-row save(msg) would re-persist the `status`
       // read at findOne time, clobbering a concurrent ack UPDATE (SENT→DELIVERED/READ) that committed in
-      // the window between this findOne and the write — reactionChains serializes reaction-vs-reaction
+      // the window between this findOne and the write — the mutation chain serializes reaction-vs-reaction
       // but NOT reaction-vs-ack, so scoping the write to metadata is what keeps delivery state monotonic
       // (#220). Other metadata fields are carried through untouched (they were read into `metadata`).
       await this.messageRepository.update({ sessionId: id, waMessageId: event.messageId }, {
@@ -1292,6 +1306,40 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
     } catch (err) {
       this.logger.error(`Failed to update message reaction: ${event.messageId}`, String(err));
     }
+  }
+
+  /** Queue a message-scoped mutation. A failed operation is isolated so later events still run. */
+  private enqueueMessageMutation(id: string, messageId: string, work: () => Promise<void>): void {
+    const key = `${id}:${messageId}`;
+    const prior = this.messageMutationChains.get(key) ?? Promise.resolve();
+    const next = prior
+      .catch(() => undefined)
+      .then(work)
+      .catch(err => {
+        // Both current mutation implementations contain their own contextual error handling. Keep a
+        // final guard here so a future implementation cannot leak a rejected fire-and-forget promise
+        // or permanently block the message's later mutations.
+        this.logger.error(`Unexpected failure applying message mutation: ${messageId}`, String(err));
+      });
+    this.messageMutationChains.set(key, next);
+    void next.finally(() => {
+      if (this.messageMutationChains.get(key) === next) {
+        this.messageMutationChains.delete(key);
+      }
+    });
+  }
+
+  /** Persist an edit before notifying consumers, while still surfacing the occurrence if storage fails. */
+  private async applyMessageEdit(id: string, message: EditedMessage): Promise<void> {
+    try {
+      await this.messageRepository.update({ sessionId: id, waMessageId: message.messageId }, { body: message.body });
+    } catch (err) {
+      this.logger.error(`Failed to update edited message: ${message.messageId}`, String(err));
+    }
+
+    const editedPayload = message as unknown as Record<string, unknown>;
+    this.eventsGateway.emitMessageEdited(id, editedPayload);
+    void this.webhookService.dispatch(id, 'message.edited', editedPayload);
   }
 
   private scheduleReconnect(id: string, session: Session): void {

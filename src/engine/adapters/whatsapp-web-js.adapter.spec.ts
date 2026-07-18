@@ -19,7 +19,7 @@ import { InternalServerErrorException, UnprocessableEntityException } from '@nes
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
-import { EngineStatus } from '../interfaces/whatsapp-engine.interface';
+import { EditedMessage, EngineStatus } from '../interfaces/whatsapp-engine.interface';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { fetch as undiciFetch } from 'undici';
 
@@ -1623,6 +1623,71 @@ describe('WhatsAppWebJsAdapter message_revoke_everyone (forwards the original de
     const revoked = onMessageRevoked.mock.calls[0][0] as { id: string; revokedId?: string };
     expect(revoked.id).toBe('REVOKE_NOTIF_RENAMED');
     expect(revoked.revokedId).toBe('ORIGINAL_RENAMED');
+  });
+});
+
+describe('WhatsAppWebJsAdapter message_edit', () => {
+  const wireEditHandler = (): { onMessageEdited: jest.Mock; client: EventEmitter } => {
+    const adapter = new WhatsAppWebJsAdapter({
+      sessionId: 'sess-edit-test',
+      sessionDataPath: './data/sessions',
+      puppeteer: {},
+    });
+    const client = Object.assign(new EventEmitter(), {
+      info: { wid: { _serialized: 'me@c.us', user: '628123' }, pushname: 'Tester' },
+      getState: jest.fn().mockResolvedValue(WAState.CONNECTED),
+      pupPage: { evaluate: jest.fn().mockResolvedValue(true) },
+    });
+    (adapter as unknown as { client: unknown }).client = client;
+    const onMessageEdited = jest.fn();
+    (adapter as unknown as { callbacks: unknown }).callbacks = { onMessageEdited };
+    (adapter as unknown as { setupEventHandlers: () => void }).setupEventHandlers();
+    return { onMessageEdited, client };
+  };
+
+  it('emits onMessageEdited with the new body and mapped fields', () => {
+    const { onMessageEdited, client } = wireEditHandler();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1700000089123);
+
+    try {
+      client.emit(
+        'message_edit',
+        {
+          id: { _serialized: 'MSG_EDIT_1' },
+          from: 'peer@c.us',
+          to: 'me@c.us',
+          author: 'peer@c.us',
+          body: 'Old text',
+          type: 'chat',
+          fromMe: false,
+          hasMedia: false,
+          mentionedIds: ['mentioned@c.us'],
+          timestamp: 1700000080,
+        },
+        'Edited new text',
+        'Old text',
+      );
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(onMessageEdited).toHaveBeenCalledTimes(1);
+    const calls = onMessageEdited.mock.calls as Array<[EditedMessage]>;
+    expect(calls[0][0]).toEqual({
+      messageId: 'MSG_EDIT_1',
+      chatId: 'peer@c.us',
+      body: 'Edited new text',
+      senderId: 'peer@c.us',
+      from: 'peer@c.us',
+      to: 'me@c.us',
+      fromMe: false,
+      isGroup: false,
+      type: 'text',
+      hasMedia: false,
+      author: 'peer@c.us',
+      mentionedIds: ['mentioned@c.us'],
+      timestamp: 1700000089,
+    });
   });
 });
 

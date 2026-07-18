@@ -92,6 +92,7 @@ import {
   updateMessageById,
   removeMessageById,
   findRevokedIndex,
+  applyMessageEdit,
   type ChatMessageView,
 } from './chatMessages.ts';
 
@@ -232,4 +233,25 @@ test('findRevokedIndex ignores an undefined revokedId rather than matching a row
   // undefined would otherwise revoke an arbitrary bubble).
   const list = [msg({ id: 'row-1', waMessageId: undefined })];
   assert.equal(findRevokedIndex(list, { id: 'REVOKE_NOTIF' }), -1);
+});
+
+test('applyMessageEdit updates a persisted row by waMessageId without mutating the input', () => {
+  const before = [msg({ id: 'row-uuid', waMessageId: 'WA_EDIT_1', body: 'old' })];
+  const after = applyMessageEdit(before, { messageId: 'WA_EDIT_1', body: 'new' });
+
+  assert.notEqual(after, before);
+  assert.equal(after[0].body, 'new');
+  assert.equal(before[0].body, 'old');
+});
+
+test('applyMessageEdit updates a live row by id', () => {
+  const before = [msg({ id: 'WA_EDIT_1', waMessageId: undefined, body: 'old' })];
+  const after = applyMessageEdit(before, { messageId: 'WA_EDIT_1', body: '' });
+  assert.equal(after[0].body, '');
+});
+
+test('applyMessageEdit is a referential no-op for an empty or unknown target id', () => {
+  const before = [msg({ id: 'm-1', body: 'old' })];
+  assert.equal(applyMessageEdit(before, { messageId: '', body: 'new' }), before);
+  assert.equal(applyMessageEdit(before, { messageId: 'missing', body: 'new' }), before);
 });

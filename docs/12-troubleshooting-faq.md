@@ -989,6 +989,7 @@ available_events:
   - message.failed       # Receipt resolved to failed
   - message.revoked      # Message deleted
   - message.reaction     # Reaction added, changed, or removed
+  - message.edited       # Message body or media caption edited
 
   # Session
   - session.status       # Session status change
