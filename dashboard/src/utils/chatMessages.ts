@@ -166,3 +166,20 @@ export function findRevokedIndex(
     m => matches(m, event.id) || (event.revokedId !== undefined && matches(m, event.revokedId)),
   );
 }
+
+/**
+ * Replace the displayed body of a cached WhatsApp message after a `message.edited` event. Persisted
+ * rows use a local UUID in `id` and the WhatsApp identity in `waMessageId`; live rows often use the
+ * WhatsApp identity for both, so both candidates are required. Returns the original array on a miss.
+ */
+export function applyMessageEdit(
+  list: ChatMessageView[],
+  event: { messageId: string; body: string },
+): ChatMessageView[] {
+  if (!event.messageId) return list;
+  const idx = list.findIndex(m => m.id === event.messageId || m.waMessageId === event.messageId);
+  if (idx === -1) return list;
+  const next = list.slice();
+  next[idx] = { ...next[idx], body: event.body };
+  return next;
+}

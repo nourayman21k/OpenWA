@@ -764,6 +764,25 @@ describe('WebhookService', () => {
       expect(await deliveries(hasMedia, 'message.received', { body: 'just text' })).toBe(0);
     });
 
+    it('filters message.edited through a wildcard subscription using its normalized message fields', async () => {
+      const f = conds(
+        { field: 'sender', operator: 'is', value: ['part@c.us'] },
+        { field: 'body', operator: 'contains', value: 'invoice' },
+        { field: 'type', operator: 'is', value: ['image'] },
+        { field: 'hasMedia', operator: 'is', value: true },
+      );
+      const data = {
+        from: '120@g.us',
+        author: 'part@c.us',
+        body: 'Updated invoice',
+        type: 'image',
+        hasMedia: true,
+      };
+
+      expect(await deliveries(f, 'message.edited', data)).toBe(1);
+      expect(await deliveries(f, 'message.edited', { ...data, body: 'lunch?', hasMedia: false })).toBe(0);
+    });
+
     it('mentions: fires when the message mentions one of the listed JIDs', async () => {
       const f = conds({ field: 'mentions', operator: 'is', value: ['boss@c.us'] });
       expect(await deliveries(f, 'message.received', { mentionedIds: ['boss@c.us', 'x@c.us'] })).toBe(1);

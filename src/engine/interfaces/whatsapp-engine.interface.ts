@@ -386,6 +386,17 @@ export interface EditedMessage {
   chatId: string;
   body: string;
   senderId: string;
+  from: string;
+  to: string;
+  fromMe: boolean;
+  isGroup: boolean;
+  type: MessageType;
+  hasMedia: boolean;
+  /** For group messages, the participant that authored the edited message. */
+  author?: string;
+  /** WIDs mentioned by the edited message's latest content. */
+  mentionedIds?: string[];
+  /** Unix seconds when the edit occurred (not the original message creation time). */
   timestamp: number;
 }
 

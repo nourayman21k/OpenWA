@@ -56,7 +56,7 @@ import {
   GroupCreateResult,
   SerializedWid,
 } from '../types/whatsapp-web-js.types';
-import { buildIncomingMessageBase, mapContactFields } from './message-mapper';
+import { buildEditedMessage, buildIncomingMessageBase, mapContactFields } from './message-mapper';
 import { buildVCard } from './vcard';
 import {
   capInboundMedia,
@@ -692,15 +692,24 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       }
     });
 
-    this.client.on('message_edit', (message, newBody, prevBody) => {
+    this.client.on('message_edit', (message, newBody) => {
       try {
-        const payload: EditedMessage = {
-          messageId: message.id._serialized,
-          chatId: message.from === this.client?.info?.wid?._serialized ? message.to : message.from,
+        // whatsapp-web.js keeps `message.timestamp` at the ORIGINAL creation time. Consumers need
+        // occurrence time for ordering multiple edits, so stamp the edit at receipt and project the
+        // otherwise-normal message fields through the same adapter mapper used by inbound messages.
+        const editTimestamp = Math.floor(Date.now() / 1000);
+        const base = buildIncomingMessageBase({
+          id: message.id,
+          from: message.from,
+          to: message.to,
           body: String(newBody),
-          senderId: message.author || message.from,
-          timestamp: message.timestamp,
-        };
+          type: message.type,
+          timestamp: editTimestamp,
+          fromMe: message.fromMe,
+          author: message.author,
+          mentionedIds: message.mentionedIds,
+        });
+        const payload: EditedMessage = buildEditedMessage(base, Boolean(message.hasMedia));
         this.callbacks.onMessageEdited?.(payload);
       } catch (error) {
         this.logger.error('Error processing message_edit', String(error));

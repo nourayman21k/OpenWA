@@ -19,7 +19,7 @@ import { InternalServerErrorException, UnprocessableEntityException } from '@nes
 import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { ChannelNotFoundError } from '../../common/errors/channel-not-found.error';
 import { ChannelMediaNotSupportedError } from '../../common/errors/channel-media-not-supported.error';
-import { EngineStatus } from '../interfaces/whatsapp-engine.interface';
+import { EditedMessage, EngineStatus } from '../interfaces/whatsapp-engine.interface';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { fetch as undiciFetch } from 'undici';
 
@@ -1647,33 +1647,47 @@ describe('WhatsAppWebJsAdapter message_edit', () => {
 
   it('emits onMessageEdited with the new body and mapped fields', () => {
     const { onMessageEdited, client } = wireEditHandler();
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1700000089123);
 
-    client.emit(
-      'message_edit',
-      {
-        id: { _serialized: 'MSG_EDIT_1' },
-        from: 'peer@c.us',
-        to: 'me@c.us',
-        author: 'peer@c.us',
-        timestamp: 1700000080,
-      },
-      'Edited new text',
-      'Old text',
-    );
+    try {
+      client.emit(
+        'message_edit',
+        {
+          id: { _serialized: 'MSG_EDIT_1' },
+          from: 'peer@c.us',
+          to: 'me@c.us',
+          author: 'peer@c.us',
+          body: 'Old text',
+          type: 'chat',
+          fromMe: false,
+          hasMedia: false,
+          mentionedIds: ['mentioned@c.us'],
+          timestamp: 1700000080,
+        },
+        'Edited new text',
+        'Old text',
+      );
+    } finally {
+      now.mockRestore();
+    }
 
     expect(onMessageEdited).toHaveBeenCalledTimes(1);
-    const edited = onMessageEdited.mock.calls[0][0] as {
-      messageId: string;
-      chatId: string;
-      body: string;
-      senderId: string;
-      timestamp: number;
-    };
-    expect(edited.messageId).toBe('MSG_EDIT_1');
-    expect(edited.chatId).toBe('peer@c.us');
-    expect(edited.body).toBe('Edited new text');
-    expect(edited.senderId).toBe('peer@c.us');
-    expect(edited.timestamp).toBe(1700000080);
+    const calls = onMessageEdited.mock.calls as Array<[EditedMessage]>;
+    expect(calls[0][0]).toEqual({
+      messageId: 'MSG_EDIT_1',
+      chatId: 'peer@c.us',
+      body: 'Edited new text',
+      senderId: 'peer@c.us',
+      from: 'peer@c.us',
+      to: 'me@c.us',
+      fromMe: false,
+      isGroup: false,
+      type: 'text',
+      hasMedia: false,
+      author: 'peer@c.us',
+      mentionedIds: ['mentioned@c.us'],
+      timestamp: 1700000089,
+    });
   });
 });
 

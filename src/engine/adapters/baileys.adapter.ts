@@ -4,6 +4,7 @@ import * as qrcode from 'qrcode';
 import type * as BaileysLib from '@whiskeysockets/baileys';
 import type { AnyMessageContent, MiscMessageGenerationOptions, WAMessage, WASocket } from '@whiskeysockets/baileys';
 import { buildIncomingMessageFromBaileys, extractBaileysBody, mapBaileysStatus } from './baileys-message-mapper';
+import { buildEditedMessage } from './message-mapper';
 import { mapBaileysGroup, mapBaileysGroupInfo } from './baileys-group-mapper';
 import type { ILogger } from '@whiskeysockets/baileys/lib/Utils/logger.js';
 import {
@@ -1103,16 +1104,44 @@ export class BaileysAdapter implements IWhatsAppEngine {
           return;
         }
         if (pm?.type === b.proto.Message.ProtocolMessage.Type.MESSAGE_EDIT) {
-          const body = extractBaileysBody(pm.editedMessage ?? {});
-          const edited: EditedMessage = {
-            messageId: pm.key?.id ?? '',
-            chatId: this.sessionStore.toNeutralJid(remoteJid),
-            body,
-            senderId: this.sessionStore.toNeutralJid(
-              msg.key.fromMe === true ? this.normalizedSelfJid() : (msg.key.participant ?? remoteJid),
-            ),
-            timestamp: this.toUnixSeconds(msg.messageTimestamp),
-          };
+          // MESSAGE_EDIT wraps the message's latest content. Normalize that INNER content separately
+          // so captions, type, PTT, media presence and mentions describe the edited value rather than
+          // the outer protocol envelope.
+          const normalizedEdited = b.normalizeMessageContent(pm.editedMessage ?? undefined) ?? pm.editedMessage ?? {};
+          const editedContentType = b.getContentType(normalizedEdited);
+          const editedSubMessage =
+            normalizedEdited.extendedTextMessage ??
+            normalizedEdited.imageMessage ??
+            normalizedEdited.videoMessage ??
+            normalizedEdited.audioMessage ??
+            normalizedEdited.documentMessage ??
+            normalizedEdited.stickerMessage ??
+            normalizedEdited.locationMessage;
+          const contextInfo = editedSubMessage?.contextInfo;
+          const base = buildIncomingMessageFromBaileys(
+            {
+              id: pm.key?.id ?? '',
+              remoteJid,
+              fromMe: msg.key.fromMe === true,
+              participant: msg.key.participant ?? undefined,
+              body: extractBaileysBody(normalizedEdited),
+              contentType: editedContentType,
+              isPtt: normalizedEdited.audioMessage?.ptt === true,
+              timestamp: this.toEditUnixSeconds(pm.timestampMs, msg.messageTimestamp),
+              selfJid: this.normalizedSelfJid(),
+              mentionedJids: contextInfo?.mentionedJid ?? undefined,
+            },
+            jid => this.sessionStore.toNeutralJid(jid),
+          );
+          const hasMedia =
+            editedContentType === 'imageMessage' ||
+            editedContentType === 'videoMessage' ||
+            editedContentType === 'audioMessage' ||
+            editedContentType === 'documentMessage' ||
+            editedContentType === 'documentWithCaptionMessage' ||
+            editedContentType === 'stickerMessage';
+          const edited: EditedMessage = buildEditedMessage(base, hasMedia);
+          this.sessionStore.recordMessageEdit(remoteJid, edited.messageId, edited.body);
           this.callbacks.onMessageEdited?.(edited);
           return;
         }
@@ -1512,6 +1541,16 @@ export class BaileysAdapter implements IWhatsAppEngine {
       return Math.floor(Date.now() / 1000);
     }
     return typeof ts === 'number' ? ts : ts.toNumber();
+  }
+
+  /** Protocol-message edit timestamps are milliseconds; the enclosing message timestamp is seconds. */
+  private toEditUnixSeconds(
+    timestampMs: number | { toNumber(): number } | null | undefined,
+    fallback: number | { toNumber(): number } | null | undefined,
+  ): number {
+    if (timestampMs == null) return this.toUnixSeconds(fallback);
+    const milliseconds = typeof timestampMs === 'number' ? timestampMs : timestampMs.toNumber();
+    return Number.isFinite(milliseconds) ? Math.floor(milliseconds / 1000) : this.toUnixSeconds(fallback);
   }
 
   /** Resolve a MediaInput's data (Buffer | base64 string | http(s) URL) to bytes + mimetype. */

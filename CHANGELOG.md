@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Live message-edit support now emits `message.edited` through webhooks and WebSocket subscriptions on
+  both engines, updates the stored message and Chats dashboard in occurrence order, and exposes the
+  standard sender/direction/type/media/mention fields to webhook smart filters. Existing wildcard (`*`)
+  subscriptions receive the new event automatically. Thanks @rogeriorioli. (#734)
+
 ### Changed
 
 - `GET /api/settings` no longer returns the incorrect, always-zero `general.sessionTimeout` field. Clients
