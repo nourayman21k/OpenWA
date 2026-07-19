@@ -19,6 +19,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are started with an `--openwa-session=<id>` marker arg, and any leftover browser process carrying
   this session's marker from a previous process lifetime (e.g. after the gateway itself was killed)
   is terminated before the new launch, alongside the existing stale Singleton-file cleanup.
+- Messages composed on a linked phone are now persisted to local history (previously only API
+  sends and inbound messages were stored). Deduplication against the REST send path is atomic on the
+  existing unique message index, and delivery/read state advances via acks on these rows as well.
+- The whatsapp-web.js own-send echo now downloads media through the same capped inbound path as
+  inbound messages (declared-size pre-gate, timeout, concurrency limiter), so phone-composed images
+  persist and render with their real payload.
+
+### Changed
+
+- Dashboard theming is simplified to a single light/dark toggle button; the accent-palette picker
+  was removed for maintainability. The stored theme is applied before first paint, so standalone
+  routes no longer flash the OS default, and the message-analytics chart now defaults to 24h.
+- The dev compose defaults `AUTO_START_SESSIONS=true`, so previously authenticated sessions come
+  back by themselves after a container restart (the application-level default stays off).
+
+### Removed
+
+- Verified dead dashboard code: unused CSS across multiple pages, dead client methods and utilities,
+  unused image assets, and 39 unused i18n keys across all locales.
 
 ### Fixed
 
@@ -38,6 +57,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   force-killed browser can never block startup; and page transport errors (`Protocol error`,
   `Target closed`, detached frame, …) observed during send/query operations are now treated as an
   immediate death signal, cutting dead-session detection from minutes to the first failed call.
+- Sent images no longer vanish from the chat thread: the realtime own-send echo carries no media
+  payload by design, and the live cache merge replaced metadata wholesale, wiping the optimistic
+  bubble's base64. Metadata now merges per field (a real payload always beats a payload-less echo
+  marker), and the post-send reconciliation folds the optimistic copy into the echo row.
+- Chat thread scrolling now behaves on every path: opens at the latest message, restores the exact
+  per-chat position when returning (position is saved continuously, not read after the content
+  swap), and stays pinned while media decodes instead of clamping the restore to the pre-decode
+  height — releasing cleanly on user scroll.
+- The messages-by-type chart no longer shows a misleading Unknown slice: rows with no body and no
+  metadata (content-less system/event rows) are excluded from the aggregation.
+- Full-text search self-heals its schema at boot when migrations are skipped (`DATABASE_SYNCHRONIZE=true`),
+  and SQLite FTS5 queries are sanitized per token, so phone numbers, chat identifiers, quotes, and
+  parentheses no longer fail as malformed queries.
+- Audit log rows now carry the resolved API key and client IP for every call site: the values are
+  stamped into the per-request async context by the auth guard and auto-filled on write (explicit
+  context still wins).
+- Dashboard readability and behavior: the send button stays readable when disabled, API Keys badges
+  render on desktop (rules were stranded in a mobile-only media query), the Templates page gets real
+  primary/secondary button styles, fourteen dark-mode selectors are corrected so dark mode applies,
+  Sessions modals regain the 90vh cap with a scrolling body, QR provisioning uses the realtime push
+  with fetching gated to `qr_ready` (no more expected-but-noisy 400 console errors), and enabling a
+  plugin with unset required config opens its config dialog with a warning instead of failing with a
+  raw sandbox error.
 
 ## [0.9.0] - 2026-07-18
 
@@ -74,6 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.19] - 2026-07-17
 
 ### Added
+
 - **Official Go SDK (`sdk/go`).** Hand-written, stdlib-only (no third-party dependencies) Go client
   covering the user-facing API surface, joining the JavaScript/Python/PHP/Java clients. Entry point is
   `openwa.New(baseURL, apiKey, opts...)`, which returns a concurrency-safe `*Client` whose exported
@@ -94,6 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test time. Requires Go 1.22+. Thanks @Revelts.
 
 ### Changed
+
 - **v0.8.18's whatsapp-web.js id-rename fix also restored the Chats page (docs only).** The v0.8.18 entry
   credits that fix with repairing inbound media downloads, message ids, acks, reply quoting, and reactions,
   but never mentions `GET /sessions/{id}/chats` — which the same patch repaired as well. The rename broke the
@@ -164,11 +208,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Corrected the send-response documentation (docs only).** The guidance added in #739 overstated what a
   stalled send tells you: it said a message resting at `sent` for a recipient you have never reached is
   "almost certainly a number that is not on WhatsApp." That inference does not hold in the other
-  direction — a *registered* recipient whose device has not come online since the send stays at `sent`
+  direction — a _registered_ recipient whose device has not come online since the send stays at `sent`
   indefinitely too, by design, so the state is not diagnostic on its own. The unevidenced claim that an
   unregistered recipient is "the most common cause" of a send that never arrives is gone, as is the
   description of what the message looks like in a WhatsApp client, which is not ours to assert. The
-  section also claimed *every* send route returns `201` with `{ messageId, timestamp }`; `POST send-bulk`
+  section also claimed _every_ send route returns `201` with `{ messageId, timestamp }`; `POST send-bulk`
   returns `202` with a batch envelope, and the `status/send-*` routes return a `statusId` and an ISO
   timestamp rather than a `messageId` and epoch seconds. Both exceptions are now stated where the rule
   is. Finally, the documented `status` lifecycle omitted its terminal error state: WhatsApp reporting an
@@ -215,7 +259,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absent, but missed the busiest path of all: `buildIncomingMessageBase`, which runs on every message
   that arrives (`onMessage`) and every message the account sends from a linked phone
   (`onMessage_create`). It read `msg.id._serialized` unguarded — and its parameter type declared the
-  id as `{ _serialized: string }`, so the renamed field was not merely unread but *unreachable*
+  id as `{ _serialized: string }`, so the renamed field was not merely unread but _unreachable_
   without a cast, and the `id: string` it produced was `undefined` at runtime. On an affected build
   without the build-time backport applied, every inbound message reached the webhook, the WebSocket
   and the database with no id: nothing to dedup on, nothing to quote in a reply, nothing for an ack
@@ -236,7 +280,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "+N" trend arrow beneath it was not a delta at all: it rendered the current READY count as though it
   were a period-over-period gain, so a steady deployment appeared to be permanently growing. The card
   now reports the READY count (relabelled "Connected Sessions") with a plain `{running} running ·
-  {total} total` breakdown, and the fake trend indicator is gone. Thanks @kabir74705 for spotting both.
+{total} total` breakdown, and the fake trend indicator is gone. Thanks @kabir74705 for spotting both.
 
 - **The whatsapp-web.js backport can no longer latch in a half-patched dependency.** The patcher proves a
   tree is whole before standing down, and #759 added that check precisely so a run that died mid-apply
@@ -250,13 +294,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image build runs the patcher directly, so it now fails the build on such a tree instead of shipping it.
   Separately, the half-patched error was the only one of the four not marked as leaving a partial tree, so
   `--best-effort` downgraded it to a warning; it now exits non-zero like the other three. Note this makes
-  the tree *reported* on the `npm install` path rather than rejected there — the `postinstall` hook
+  the tree _reported_ on the `npm install` path rather than rejected there — the `postinstall` hook
   discards the patcher's exit code, so the install still succeeds; that is pre-existing and deliberately
   untouched, since failing `npm install` outright is the trade the flag exists to avoid. Both fixes are
   regression-tested, including the `--best-effort` path.
 
 - **A status post no longer claims success it cannot prove, and no longer throws away a readable id.**
-  #762 established that `whatsapp-web.js` can *resolve* `undefined` instead of throwing, and that reporting
+  #762 established that `whatsapp-web.js` can _resolve_ `undefined` instead of throwing, and that reporting
   that as success is unrecoverable — so a send with no message back now fails loudly. Status posts were
   left on the old behavior: they returned **201** with an empty `statusId` and a `new Date()` invented on
   the spot, for a status that may never have been published. Their case is in fact simpler than a send's —
@@ -273,7 +317,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Message Tester no longer invents HTTP status codes.** Its result banner rendered one of two
   hardcoded strings — `200 OK - Success` or `400 - Failed` — for every outcome, in all eleven locales.
   Neither number was ever read from the response. Send routes return **201**, not 200, so the success
-  banner was wrong on every successful send; and *any* failure displayed `400`, including a server 500
+  banner was wrong on every successful send; and _any_ failure displayed `400`, including a server 500
   and the recipient pre-check that short-circuits in the browser without issuing a request at all. The
   banner now states the outcome and, when a request actually reached the gateway, the real status the
   gateway returned — which `services/api.ts` already attaches to the error for exactly this purpose.
@@ -320,7 +364,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absent and the lookup falls back to `id`, as before. Refs #755.
 
 - **A failed group creation now reports why it failed.** `whatsapp-web.js` signals a failed
-  `createGroup` by *resolving* with a plain string (`'CreateGroupError: …'`) instead of throwing, and
+  `createGroup` by _resolving_ with a plain string (`'CreateGroupError: …'`) instead of throwing, and
   its typings say so (`Promise<CreateGroupResult | string>`) — but the adapter cast that union away and
   read `.gid` off the string, so the reason upstream gave us was replaced by an opaque
   `TypeError`. The union is handled, and an unreadable group id now fails loudly rather than being
@@ -334,7 +378,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   advanced" line behind. It is now dropped at the adapter boundary, where the reason is still visible.
 
 - **A send whose message can't be read back no longer crashes, and never claims a delivery it can't
-  prove.** `whatsapp-web.js`'s `Client.sendMessage()` can *resolve* with `undefined` instead of
+  prove.** `whatsapp-web.js`'s `Client.sendMessage()` can _resolve_ with `undefined` instead of
   throwing, while its typings declare `Promise<Message>` — so the adapter's `msg.id._serialized` reads
   surfaced as an opaque `TypeError: Cannot read properties of undefined (reading 'id')` and a 500, at
   seven send sites. All of them now route through one helper that distinguishes the two cases the
@@ -346,7 +390,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `(sessionId, waMessageId)` unique index and silently drop a bulk row. Refs #757.
 
 ### Security
-
 
 ## [0.8.18] - 2026-07-17
 
@@ -433,7 +476,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declaring a huge entry size could drive an unbounded `Buffer.alloc` and exhaust memory during
   extraction. This closes the declared-size allocation vector on the plugin marketplace install path
   (`src/modules/plugins/plugin-installer.ts`), complementing the project's own `readEntryData()` guard
-  that already caps *decompressed* bytes via zlib `maxOutputLength`. The two adm-zip 0.6.0 behavior
+  that already caps _decompressed_ bytes via zlib `maxOutputLength`. The two adm-zip 0.6.0 behavior
   changes (`extractEntryTo` subdirectory preservation, non-fatal `utimes`) touch APIs this project does
   not use. The now-redundant `@types/adm-zip` devDependency is dropped as well — adm-zip 0.6.0 ships its
   own `types.d.ts`.
@@ -514,8 +557,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Chat labels on the Baileys engine.** `addLabelToChat` and `removeLabelFromChat` now work on
   the Baileys engine — 1:1 to `sock.addChatLabel(chatId, labelId)` / `sock.removeChatLabel(chatId,
-  labelId)` instead of returning 501. WhatsApp-Business-only (rejects on personal accounts). Label
-  *listing* (`getLabels` / `getLabelById` / `getChatLabels`) remains unavailable on Baileys (no
+labelId)` instead of returning 501. WhatsApp-Business-only (rejects on personal accounts). Label
+  _listing_ (`getLabels` / `getLabelById` / `getChatLabels`) remains unavailable on Baileys (no
   first-class library API — see `docs/engine-capability-matrix.md`).
 
 - **Status delete on the whatsapp-web.js engine.** `deleteStatus(statusId)` now works on
@@ -527,7 +570,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `getContactStatus(contactId)` now return contact "stories" (24h status posts) via
   whatsapp-web.js `getBroadcasts()` / `getBroadcastById()` flattened to `Status[]` (contact via
   `broadcast.getContact()`, type from `MessageTypes`, 24h TTL) instead of stubbing to `[]`. The
-  Baileys engine still cannot read stories — `fetchStatus` returns the *about* text, not stories
+  Baileys engine still cannot read stories — `fetchStatus` returns the _about_ text, not stories
   (documented as a library limitation).
 
 - **Channel lookup / subscribe / unsubscribe on the Baileys engine.** `getChannelById(id)`,
@@ -586,7 +629,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since the SQLite `DATABASE_NAME` file-path validation tightened (it pinned an in-memory data DB,
   which that rule rejects). The data connection now uses a temp-dir SQLite file that is removed on
   exit, so the snapshot generator runs hermetically again.
-
 
 ## [0.8.16] - 2026-07-12
 
