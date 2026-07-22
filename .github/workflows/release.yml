@@ -440,18 +440,38 @@ jobs:
             grep -q "$want" /tmp/inspect.txt || { echo "MISSING PLATFORM: $want"; exit 1; }
           done
 
-      # Best-effort: the staging tag has served its purpose. Leaving it would accumulate one stray
-      # tag per release. A failure here must not fail the release — the tags are already promoted.
-      - name: Remove the staging tag
+      # Best-effort tidy-up of the staging tag, and it MUST refuse to act unless that tag is the only
+      # one on its version.
+      #
+      # GHCR deletes by *version*, not by tag, and a version carries every tag pointing at it. The
+      # promote step above re-points the release tags at content identical to the staging image, so
+      # they resolve to the same digest and therefore the same version — whose tag list is
+      # ["smoke-<run>", "X.Y.Z", "X.Y", "latest"]. Deleting that version by id took the release tags
+      # with it: v0.10.5 published a GitHub Release while `latest`, `0.10` and `0.10.5` all vanished
+      # from the registry, so `docker pull` failed for everyone until they were restored.
+      #
+      # On the happy path this is now a no-op, which is correct — a stray staging tag is harmless, and
+      # far cheaper than un-publishing a release. It still cleans up the case it was written for: a run
+      # where promotion never happened, leaving the staging tag alone on its version.
+      - name: Remove the staging tag (only when it is alone on its version)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version_id=$(gh api "/users/${{ github.repository_owner }}/packages/container/openwa/versions" \
-            --jq ".[] | select(.metadata.container.tags[]? == \"smoke-${{ github.run_id }}\") | .id" | head -1)
-          if [ -n "$version_id" ]; then
-            gh api -X DELETE "/users/${{ github.repository_owner }}/packages/container/openwa/versions/$version_id" \
-              && echo "removed staging tag version $version_id"
-          else
+          staging="smoke-${{ github.run_id }}"
+          version_json=$(gh api "/users/${{ github.repository_owner }}/packages/container/openwa/versions" \
+            --jq ".[] | select(.metadata.container.tags[]? == \"$staging\") | {id, tags: .metadata.container.tags}" | head -1)
+          if [ -z "$version_json" ]; then
             echo "staging tag not found (already cleaned up)"
+            exit 0
+          fi
+          version_id=$(printf '%s' "$version_json" | jq -r .id)
+          tags=$(printf '%s' "$version_json" | jq -r '.tags | join(",")')
+          tag_count=$(printf '%s' "$version_json" | jq -r '.tags | length')
+          if [ "$tag_count" = "1" ]; then
+            gh api -X DELETE "/users/${{ github.repository_owner }}/packages/container/openwa/versions/$version_id" \
+              && echo "removed staging-only version $version_id"
+          else
+            echo "keeping version $version_id — the release tags share it (tags: $tags)."
+            echo "Deleting it would unpublish them; the stray staging tag is left behind on purpose."
           fi
