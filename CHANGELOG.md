@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.5] - 2026-07-22
+
 ### Fixed
 
+- **Plugins you enabled stay enabled across a restart.** Every restart of the gateway — an upgrade, a
+  host reboot, a container restart policy — silently switched off every extension plugin, with nothing
+  written to the log and nothing shown in the dashboard. An integration such as the Chatwoot adapter
+  simply stopped relaying until someone noticed and turned it back on by hand. Your enable decision is
+  now remembered separately from whether the plugin happens to be running, and the plugins you had
+  enabled are started again once the gateway has finished coming up. A plugin that fails to start is
+  logged and left disabled rather than holding up the gateway. Enabling still runs the plugin's full
+  lifecycle, and a plugin you disabled stays disabled. Nothing to do on upgrade: a plugin that is
+  enabled when you upgrade is carried over automatically ([#856](https://github.com/rmyndharis/OpenWA/issues/856)).
 - **Messages handled by a plugin are no longer missing from your history.** When an auto-reply plugin
   answered a message, it told the gateway to stop passing that message to the remaining plugins — and
   the gateway took that as a cue to forget the message entirely. It was never saved, never sent to your
@@ -22,9 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applied and was silently gone the next time the dialog was opened. The failure and its reason are now
   shown. The same fix applies to a plugin that fails to disable, which previously reported nothing at
   all.
-
-### Fixed
-
 - **A plugin that ships its own settings editor no longer shows two editors at once.** When a plugin
   provided a custom editor, the dashboard rendered the generated form underneath it as well — so every
   field appeared twice, followed by a second Save button that behaved differently from the editor's own.
@@ -35,32 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the middle of a dark dialog. The dashboard now tells the editor which theme is in use. Plugin
   authors: the theme arrives with the existing settings handshake and can be ignored safely; see
   [19 — Plugin Architecture](docs/19-plugin-architecture.md) for the contract.
-
-### Fixed
-
-- **Plugins you enabled stay enabled across a restart.** Every restart of the gateway — an upgrade, a
-  host reboot, a container restart policy — silently switched off every extension plugin, with nothing
-  written to the log and nothing shown in the dashboard. An integration such as the Chatwoot adapter
-  simply stopped relaying until someone noticed and turned it back on by hand. Your enable decision is
-  now remembered separately from whether the plugin happens to be running, and the plugins you had
-  enabled are started again once the gateway has finished coming up. A plugin that fails to start is
-  logged and left disabled rather than holding up the gateway. Enabling still runs the plugin's full
-  lifecycle, and a plugin you disabled stays disabled. Nothing to do on upgrade: a plugin that is
-  enabled when you upgrade is carried over automatically ([#856](https://github.com/rmyndharis/OpenWA/issues/856)).
-
 - **The chat list no longer shows a stray `0` next to every conversation.** Each row in the Chats
   sidebar rendered a literal `0` where the last message's time belongs, on every chat. A conversation
   with no messages reports a timestamp of zero, and the check that was meant to hide the time in that
   case ended up displaying the zero itself. The time is now simply omitted when there is no last
   message, as intended. The unread-count badge was unaffected.
-
-- **A message send that is retried after a recipient-address change is now recorded in the log.** When
-  whatsapp-web.js reports that a contact's cached address is stale, the gateway re-resolves the address
-  and sends again. That retry was silent, so in the case where the engine reports a failure for a
-  message it had in fact already delivered, the resulting second copy appeared nowhere in the logs and
-  could only be noticed on the recipient's phone. The retry now logs a warning naming the chat and both
-  addresses. Sending behaviour is unchanged.
-
 - **The login screen shows the gateway's actual version again.** The dashboard resolved its version
   from whichever `package.json` sat in the working directory the build ran from, which meant
   `dashboard/package.json` — a file a release never touches — rather than the root `package.json` that
@@ -69,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build-time value with the live version from the API once you are signed in; the login screen has no
   session yet and shows the constant as-is. The version is now resolved relative to the build config
   itself, so it no longer depends on where the build was started from.
+- **A message send that is retried after a recipient-address change is now recorded in the log.** When
+  whatsapp-web.js reports that a contact's cached address is stale, the gateway re-resolves the address
+  and sends again. That retry was silent, so in the case where the engine reports a failure for a
+  message it had in fact already delivered, the resulting second copy appeared nowhere in the logs and
+  could only be noticed on the recipient's phone. The retry now logs a warning naming the chat and both
+  addresses. Sending behaviour is unchanged.
 
 ### Changed
 
