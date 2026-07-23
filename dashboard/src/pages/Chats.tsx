@@ -34,6 +34,7 @@ import {
   type Channel,
   type MessageType,
   type SearchHit,
+  type ContactStatusGroup,
 } from '../services/api';
 import {
   applyMessageEdit,
@@ -50,6 +51,7 @@ import { PageHeader } from '../components/PageHeader';
 import { GlobalSearch } from '../components/GlobalSearch';
 import { useChatMessages, useChatMessagesActions, messagesQueryKey } from '../hooks/useChatMessages';
 import { useChannelMessages } from '../hooks/useChannelMessages';
+import { useContactStatuses } from '../hooks/useContactStatuses';
 import { useChatScrollPosition } from '../hooks/useChatScrollPosition';
 import { useCurrentEngineQuery } from '../hooks/queries';
 import MessageBody from '../components/chats/MessageBody';
@@ -140,6 +142,7 @@ export function Chats() {
   // Selected chat & message history
   const [activeChat, setActiveChat] = useState<Chat | null>(null);
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
+  const [activeStatusContact, setActiveStatusContact] = useState<ContactStatusGroup | null>(null);
 
   // Chats/Channels/Status tab selection. Switching tabs closes whatever conversation is open so a
   // press on another tab doesn't leave a Chats-tab room rendered underneath a Channels/Status list.
@@ -148,6 +151,7 @@ export function Chats() {
     setActiveTab(tab);
     setActiveChat(null);
     setActiveChannel(null);
+    setActiveStatusContact(null);
   }, []);
 
   // Channels tab: only whatsapp-web.js implements channel listing/reading — Baileys throws 501 for
@@ -160,6 +164,10 @@ export function Chats() {
     enabled: Boolean(selectedSessionId) && channelsSupported && activeTab === 'channels',
   });
   const channelMessages = useChannelMessages(selectedSessionId, activeChannel?.id ?? null);
+
+  // Status tab: both engines expose stored status content, so this query isn't engine-gated (unlike
+  // channelsQuery above).
+  const statusesQuery = useContactStatuses(selectedSessionId);
 
   // A channel feed opens at its newest post, mirroring the chat room's initial scroll. The pane is
   // also keyed by channel id, so switching channels remounts the feed instead of reusing the DOM
@@ -325,6 +333,7 @@ export function Chats() {
       void loadChats(selectedSessionId);
       setActiveChat(null);
       setActiveChannel(null);
+      setActiveStatusContact(null);
       setAttachment(null);
       setPreviewUrl(null);
     }
@@ -677,10 +686,12 @@ export function Chats() {
             setActiveTab('status');
             setActiveChat(chat);
             setActiveChannel(null);
+            setActiveStatusContact(null);
           } else {
             setActiveTab('chats');
             setActiveChat(chat);
             setActiveChannel(null);
+            setActiveStatusContact(null);
           }
         } else {
           pendingHitRef.current = null;
@@ -703,10 +714,12 @@ export function Chats() {
         setActiveTab('status');
         setActiveChat(chat);
         setActiveChannel(null);
+        setActiveStatusContact(null);
       } else {
         setActiveTab('chats');
         setActiveChat(chat);
         setActiveChannel(null);
+        setActiveStatusContact(null);
       }
     }
   }, [chats, activeChat, switchTab]);
@@ -933,6 +946,28 @@ export function Chats() {
     ch => ch.name.toLowerCase().includes(searchQueryLower) || ch.id.toLowerCase().includes(searchQueryLower),
   );
 
+  // Status tab: group the flat status list by contact (one row per contact, newest status first
+  // within each group), newest-contact-first across groups, filtered by the same search box.
+  // A plain const (not useMemo) mirrors filteredChats/filteredChannels above — statusesQuery.data
+  // is already a stable, query-cached reference, so re-grouping on every render is cheap.
+  const byStatusContact = new Map<string, ContactStatusGroup>();
+  for (const item of statusesQuery.data ?? []) {
+    const existing = byStatusContact.get(item.contact.id);
+    if (existing) {
+      existing.items.push(item);
+      if (item.timestamp > existing.latest) existing.latest = item.timestamp;
+    } else {
+      byStatusContact.set(item.contact.id, { contact: item.contact, items: [item], latest: item.timestamp });
+    }
+  }
+  const groupedStatuses = Array.from(byStatusContact.values())
+    .filter(
+      g =>
+        (g.contact.name ?? '').toLowerCase().includes(searchQueryLower) ||
+        g.contact.id.toLowerCase().includes(searchQueryLower),
+    )
+    .sort((a, b) => (a.latest < b.latest ? 1 : a.latest > b.latest ? -1 : 0));
+
   // Shared row markup for the Chats and Status lists — a plain function (not memoized) since it
   // closes over render-scoped state (activeChat, listPics) that already changes every render.
   const renderChatRow = (chat: Chat) => {
@@ -1145,16 +1180,46 @@ export function Chats() {
               </div>
             )}
 
-            {/* Status list — the wwjs status@broadcast aggregate row, if present. Real per-status
-                (per-contact story) rows are a future capability; this tab starts as a placeholder. */}
+            {/* Status list — the wwjs status@broadcast aggregate row, if present, followed by the
+                per-contact status groups read from the store. Not engine-gated: both engines now
+                have status content. */}
             {activeTab === 'status' && (
               <div className="chats-list">
                 {statusChats.map(renderChatRow)}
-                <div className="chats-room-placeholder">
-                  <CircleDashed size={40} />
-                  <h2>{t('chats.status.placeholderTitle')}</h2>
-                  <p>{t('chats.status.placeholderDesc')}</p>
-                </div>
+                {statusesQuery.isLoading ? (
+                  <div className="chats-list-loading">
+                    <Loader2 className="animate-spin" size={24} />
+                  </div>
+                ) : groupedStatuses.length === 0 ? (
+                  <div className="chats-list-empty">
+                    <span>{t('chats.status.empty')}</span>
+                  </div>
+                ) : (
+                  groupedStatuses.map(group => (
+                    <div
+                      key={group.contact.id}
+                      className={`chat-item-card ${activeStatusContact?.contact.id === group.contact.id ? 'active' : ''}`}
+                      onClick={() => setActiveStatusContact(group)}
+                    >
+                      <div className="chat-avatar">
+                        <CircleDashed size={20} />
+                      </div>
+                      <div className="chat-item-info">
+                        <div className="chat-item-top">
+                          <span className="chat-item-name">{group.contact.name || group.contact.id}</span>
+                          <span className="chat-item-time">
+                            {formatChatTime(Math.floor(new Date(group.latest).getTime() / 1000))}
+                          </span>
+                        </div>
+                        <div className="chat-item-bottom">
+                          <span className="chat-item-snippet">
+                            {t('chats.status.itemCount', { count: group.items.length })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </aside>
