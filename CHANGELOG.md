@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Deutsch" in the language switcher. All 689 translation keys are covered, so German users get a
   fully localized UI instead of the English fallback. Thanks @rjsebening.
 
+- **A single `kind` discriminator identifies every chat and message.** Chat summaries and inbound
+  messages now carry one canonical `kind` field — `individual`, `group`, `channel`, `status`,
+  `broadcast`, or `unknown` — instead of leaving every consumer to infer the type from ad-hoc boolean
+  flags or JID suffixes. The field is threaded consistently through the REST API, webhook payloads,
+  the WebSocket event stream, plugins, and the typed SDKs, so a channel post or a status update is no
+  longer indistinguishable from an ordinary chat message downstream. The existing `isGroup` and
+  `isStatusBroadcast` fields are unchanged and keep working for integrations that already rely on them.
+
+- **The dashboard Chats page is split into Chats, Channels, and Status tabs.** Channel posts and
+  status broadcasts previously showed up mixed into the same list as regular conversations. The new
+  Channels tab lists the channels you're subscribed to, with a read-only view of their posts; it is
+  available on the whatsapp-web.js engine. The Status tab keeps broadcast updates separate from
+  one-on-one and group chats, so the main Chats list holds only actual conversations.
+
 ### Fixed
 
 - **Chat list unread badge shape and overflow.** The unread-count badge in the chats sidebar rendered as an uneven oval and grew without bound as the count climbed. It now uses a fixed height with border-box sizing so a single digit is a true circle and larger counts form a rounded pill, and its label is capped at `99+`. The badge also exposes the exact unread count to assistive technology and as a hover tooltip.
