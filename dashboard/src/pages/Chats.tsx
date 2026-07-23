@@ -126,7 +126,15 @@ function ChatAvatar({ pictureUrl, kind }: { pictureUrl?: string | null; kind: Ch
 // Status image item. <img src="/api/..."> can't carry the X-API-Key header, so the bytes are
 // fetched via sessionApi (which does) and re-exposed as a local object URL. The URL is revoked on
 // unmount/statusId change to avoid leaking blob memory as the viewer browses items.
-function StatusMedia({ sessionId, statusId }: { sessionId: string | null; statusId: string }) {
+function StatusMedia({
+  sessionId,
+  statusId,
+  type,
+}: {
+  sessionId: string | null;
+  statusId: string;
+  type: 'image' | 'video';
+}) {
   const { t } = useTranslation();
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<boolean>(false);
@@ -155,6 +163,7 @@ function StatusMedia({ sessionId, statusId }: { sessionId: string | null; status
 
   if (error) return <span className="status-media-placeholder">{t('chats.status.mediaUnavailable')}</span>;
   if (!src) return null;
+  if (type === 'video') return <video className="channel-media" src={src} controls />;
   return <img className="channel-media" src={src} alt="" />;
 }
 
@@ -1719,10 +1728,14 @@ export function Chats() {
                 <div className="messages-list" ref={statusFeedRef}>
                   {activeStatusContact.items.map(item => (
                     <div key={item.id} className="message-bubble incoming">
-                      {item.mediaUrl && <StatusMedia sessionId={selectedSessionId || null} statusId={item.id} />}
-                      {(item.type === 'text' || !item.mediaUrl) && (
-                        <MessageBody text={item.caption ?? ''} className="message-text" />
+                      {item.mediaUrl && (
+                        <StatusMedia
+                          sessionId={selectedSessionId || null}
+                          statusId={item.id}
+                          type={item.type === 'video' ? 'video' : 'image'}
+                        />
                       )}
+                      {item.caption && <MessageBody text={item.caption} className="message-text" />}
                       <span className="message-time">
                         {formatChatTime(Math.floor(new Date(item.timestamp).getTime() / 1000))}
                       </span>
