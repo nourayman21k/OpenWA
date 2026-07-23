@@ -191,6 +191,7 @@ type ChatHistoryMessage struct {
 	FromMe            bool              `json:"fromMe"`
 	IsGroup           bool              `json:"isGroup"`
 	IsStatusBroadcast bool              `json:"isStatusBroadcast"`
+	Kind              string            `json:"kind"`
 	Author            string            `json:"author,omitempty"`
 	MentionedIDs      []string          `json:"mentionedIds,omitempty"`
 	IsLidSender       bool              `json:"isLidSender,omitempty"`

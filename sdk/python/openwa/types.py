@@ -251,6 +251,7 @@ ChatHistoryMessage = TypedDict(
         "fromMe": bool,
         "isGroup": bool,
         "isStatusBroadcast": bool,
+        "kind": str,
         "author": Jid,
         "mentionedIds": list,
         "isLidSender": bool,
@@ -534,6 +535,7 @@ class ChatSummary(TypedDict, total=False):
     # Server returns a plain preview string, not a message object.
     lastMessage: str
     timestamp: str | int
+    kind: str
 
 
 class MarkChatRequest(TypedDict):
