@@ -135,7 +135,7 @@ These are honestly out of reach of a clean adapter wiring because the installed 
 - `getLabels` / `getLabelById` / `getChatLabels` — no label read symbol; only writes (`Types/Label.d.ts` is types-only). Workaround: capture labels from the `messaging-history.set` app-state event into an in-memory cache (relay hack, no on-demand refresh).
 - `getChatHistory` — only `fetchMessageHistory` (event-delivered sync token); no synchronous per-chat `fetchMessages`. Needs an OpenWA-side chat-indexed store fed from `messages.upsert` + `messaging-history.set`.
 - `getMessageReactions` — no on-demand fetch; reactions only arrive via the `messages.reaction` event. Partial local path: persist each event into the `messageStore`, then read (no historical backfill).
-- `getContactStatus` / `getContactStatuses` — `fetchStatus` returns the *about* text, not 24h stories; stories only surface as `status@broadcast` messages. Needs an OpenWA-side story accumulator.
+- `getContactStatus` / `getContactStatuses` — `fetchStatus` returns the *about* text, not 24h stories; stories only surface as `status@broadcast` messages. The engine-level Baileys adapter methods remain unimplemented (`501`); however, the REST API reads are served from the `StatusStoreService` accumulator (see §Status — read above), so API-level parity is shipped.
 - `sendCatalog` — no catalog-share message type in `AnyMessageContent` (only single `{product}`).
 
 **wwjs (6 cells):**
