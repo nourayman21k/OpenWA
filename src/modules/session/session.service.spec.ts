@@ -1632,6 +1632,7 @@ describe('SessionService', () => {
       timestamp: 1706868000,
       fromMe: false,
       isGroup: false,
+      kind: 'individual',
       ...overrides,
     });
 
@@ -2594,6 +2595,7 @@ describe('SessionService', () => {
         timestamp: 1,
         fromMe: false,
         isGroup: false,
+        kind: 'individual',
       };
       callbacks.onMessage?.(msg);
       await flush();

@@ -2121,7 +2121,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // enrichment as live incoming messages (#223). The mapper defaults chatId to
       // msg.from, which is wrong here (history includes fromMe messages whose `from`
       // is our own number), so override it to the requested chat and recompute the
-      // chatId-derived flags (isGroup, isStatusBroadcast) from the real chat.
+      // chatId-derived flags (isGroup, isStatusBroadcast, kind) from the real chat.
       const out = buildIncomingMessageBase(msg);
       out.chatId = chatId;
       out.isGroup = chatId.endsWith('@g.us');
