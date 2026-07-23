@@ -16,6 +16,9 @@
 /** A WhatsApp JID, e.g. `628123456789@c.us` (user) or `120363…@g.us` (group). */
 export type Jid = string;
 
+/** Chat/message kind discriminator. */
+export type ChatKind = 'individual' | 'group' | 'channel' | 'status' | 'broadcast' | 'unknown';
+
 /** Session lifecycle status. */
 export type SessionStatus =
   'created' | 'initializing' | 'qr_ready' | 'authenticating' | 'ready' | 'disconnected' | 'failed';
@@ -230,6 +233,7 @@ export interface ChatHistoryMessage {
   fromMe: boolean;
   isGroup: boolean;
   isStatusBroadcast?: boolean;
+  kind?: ChatKind;
   /** For group messages, the participant who sent it (`from` is the group JID). */
   author?: Jid;
   mentionedIds?: Jid[];
@@ -548,6 +552,7 @@ export interface ChatSummary {
   /** Preview text of the last message (the server returns a plain string, not an object). */
   lastMessage?: string;
   timestamp?: string | number;
+  kind?: ChatKind;
 }
 
 export interface MarkChatRequest {
