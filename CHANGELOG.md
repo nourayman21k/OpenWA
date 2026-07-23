@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Release images are now also published to Docker Hub.** Every release image is dual-published,
+  bit-identical, to `docker.io/rmyndharis/openwa` alongside `ghcr.io/rmyndharis/openwa` — the same
+  `X.Y.Z` / `X.Y` / `latest` tags, with provenance and SBOM attestations, and both registries are
+  verified publicly pullable before the release completes.
+
 - **German (`de`) dashboard translation.** The dashboard now ships a full German locale and offers
-  "Deutsch" in the language switcher. All 689 translation keys are covered, so German users get a
+  "Deutsch" in the language switcher. All translation keys are covered, so German users get a
   fully localized UI instead of the English fallback. Thanks @rjsebening.
 
 - **Audit-log coverage for sensitive infrastructure operations.** The admin-only infrastructure
