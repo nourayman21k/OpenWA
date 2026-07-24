@@ -122,6 +122,8 @@ describe('SessionService', () => {
       resolveContactPhone: jest.fn().mockResolvedValue('628111222333'),
       rejectCall: jest.fn().mockResolvedValue(undefined),
       getContactStatuses: jest.fn().mockResolvedValue([]),
+      getChatHistory: jest.fn().mockResolvedValue([]),
+      getContactById: jest.fn().mockResolvedValue(null),
     };
 
     engineFactory = {
@@ -2600,31 +2602,67 @@ describe('SessionService', () => {
       expect(auth[0][2]).toMatchObject({ sessionId: 'sess-uuid-1', phone: '628123', pushName: 'Alice' });
     });
 
-    it('seeds the status store from engine.getContactStatuses() when the engine reports ready', async () => {
+    it('seeds the status store from the status-broadcast chat history when the engine reports ready', async () => {
       const callbacks = await startAndCaptureCallbacks();
-      mockEngine.getContactStatuses.mockResolvedValue([
-        {
+      mockEngine.getChatHistory.mockResolvedValue([
+        makeMessage({
           id: 'st-a',
-          contact: { id: '628111@c.us', name: 'Alice', pushName: 'Ali' },
+          from: 'status@broadcast',
+          chatId: 'status@broadcast',
+          isStatusBroadcast: true,
+          author: '628111@c.us',
+          kind: 'status',
           type: 'text',
-          caption: 'hi',
-          backgroundColor: '#fff',
-          font: 1,
-          timestamp: new Date(1700000000000),
-          expiresAt: new Date(1700086400000),
-        },
-        {
+          body: 'hi',
+          timestamp: 1700000000,
+          contact: { id: '628111@c.us', name: 'Alice', pushName: 'Ali' },
+        }),
+        makeMessage({
           id: 'st-b',
-          contact: { id: '628222@c.us' },
+          from: 'status@broadcast',
+          chatId: 'status@broadcast',
+          isStatusBroadcast: true,
+          author: '628222@c.us',
+          kind: 'status',
           type: 'image',
-          timestamp: new Date(1700000001000),
-          expiresAt: new Date(1700086401000),
-        },
+          body: '',
+          timestamp: 1700000001,
+        }),
+        // Poster resolves to the shared pseudo-JID → buildIncomingStatus returns null → never ingested.
+        makeMessage({
+          id: 'st-self',
+          from: 'status@broadcast',
+          chatId: 'status@broadcast',
+          isStatusBroadcast: true,
+          author: 'status@broadcast',
+          kind: 'status',
+          type: 'text',
+        }),
       ]);
+      // st-b's message carries no cached contact name; the seed resolves it via getContactById.
+      mockEngine.getContactById.mockImplementation((jid: string) =>
+        Promise.resolve(
+          jid === '628222@c.us'
+            ? {
+                id: '628222@c.us',
+                name: 'Bob',
+                pushName: 'Bobby',
+                number: '628222',
+                isMyContact: true,
+                isBlocked: false,
+              }
+            : null,
+        ),
+      );
 
       callbacks.onReady!('628123', 'Alice');
       await flush();
 
+      // Reads the status-broadcast chat's own messages (with media), not the near-empty-at-ready
+      // getBroadcasts collection.
+      expect(mockEngine.getChatHistory).toHaveBeenCalledWith('status@broadcast', 50, true);
+      expect(mockEngine.getContactStatuses).not.toHaveBeenCalled();
+      // Two usable statuses ingested; the pseudo-JID poster is filtered out.
       expect(statusStore.ingest).toHaveBeenCalledTimes(2);
       expect(statusStore.ingest).toHaveBeenNthCalledWith(
         1,
@@ -2636,30 +2674,42 @@ describe('SessionService', () => {
           contactPushName: 'Ali',
           type: 'text',
           caption: 'hi',
-          backgroundColor: '#fff',
-          font: 1,
           postedAt: 1700000000000,
         }),
       );
+      // st-b had no cached name, so the seed backfilled it from getContactById.
       expect(statusStore.ingest).toHaveBeenNthCalledWith(
         2,
         'sess-uuid-1',
-        expect.objectContaining({ waStatusId: 'st-b', contactJid: '628222@c.us', type: 'image' }),
+        expect.objectContaining({
+          waStatusId: 'st-b',
+          contactJid: '628222@c.us',
+          type: 'image',
+          contactName: 'Bob',
+          contactPushName: 'Bobby',
+        }),
       );
+      // The lookup runs only for the poster that lacked a name; st-a already had one.
+      expect(mockEngine.getContactById).toHaveBeenCalledWith('628222@c.us');
+      expect(mockEngine.getContactById).not.toHaveBeenCalledWith('628111@c.us');
     });
 
-    it('passes engine-supplied status media through to statusStore.ingest (seeded media renders like live)', async () => {
+    it('seeds status media downloaded with the history so it renders like a live post', async () => {
       const callbacks = await startAndCaptureCallbacks();
       const media = { mimetype: 'image/png', data: 'QUJD' };
-      mockEngine.getContactStatuses.mockResolvedValue([
-        {
+      mockEngine.getChatHistory.mockResolvedValue([
+        makeMessage({
           id: 'st-c',
-          contact: { id: '628333@c.us' },
+          from: 'status@broadcast',
+          chatId: 'status@broadcast',
+          isStatusBroadcast: true,
+          author: '628333@c.us',
+          kind: 'status',
           type: 'image',
-          timestamp: new Date(1700000002000),
-          expiresAt: new Date(1700086402000),
+          body: '',
+          timestamp: 1700000002,
           media,
-        },
+        }),
       ]);
 
       callbacks.onReady!('628123', 'Alice');
@@ -2671,9 +2721,9 @@ describe('SessionService', () => {
       );
     });
 
-    it('swallows a getContactStatuses failure on ready (e.g. Baileys EngineNotSupportedError) without throwing', async () => {
+    it('swallows a status-history failure on ready (e.g. Baileys has no status chat) without throwing', async () => {
       const callbacks = await startAndCaptureCallbacks();
-      mockEngine.getContactStatuses.mockRejectedValue(new Error('not supported'));
+      mockEngine.getChatHistory.mockRejectedValue(new Error('not supported'));
 
       expect(() => callbacks.onReady!('628123', 'Alice')).not.toThrow();
       await flush();

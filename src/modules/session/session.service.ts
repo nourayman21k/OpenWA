@@ -64,6 +64,12 @@ import {
 // history sync) get the omitted marker synthesized at the persistence chokepoints.
 const MEDIA_MESSAGE_TYPES = new Set(['image', 'video', 'audio', 'voice', 'sticker', 'document']);
 
+// How many recent status-broadcast messages the connect-time seed pulls (each with its media).
+// ponytail: fixed ceiling — the most-recent 50 cover a normal account's 24h of stories; anything
+// posted after connect still lands live via onMessage. Make it configurable only if a flood account
+// proves 50 too few.
+const STATUS_SEED_LIMIT = 50;
+
 interface ReconnectState {
   attempts: number;
   timer: NodeJS.Timeout | null;
@@ -658,22 +664,43 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
    */
   private async seedStatuses(sessionId: string, engine: IWhatsAppEngine): Promise<void> {
     try {
-      const statuses = await engine.getContactStatuses();
-      for (const s of statuses) {
-        await this.statusStore.ingest(sessionId, {
-          waStatusId: s.id,
-          contactJid: s.contact.id,
-          contactName: s.contact.name,
-          contactPushName: s.contact.pushName,
-          type: s.type,
-          caption: s.caption,
-          backgroundColor: s.backgroundColor,
-          font: s.font,
-          // Seed now downloads media the same way the live onMessage path does (collectStatuses calls
-          // capInboundMediaFor), so a status active at connect time renders like one that arrives live.
-          media: s.media,
-          postedAt: s.timestamp.getTime(),
-        });
+      // Read the status-broadcast chat's own recent messages rather than getContactStatuses(): on
+      // whatsapp-web.js the latter reads the StatusV3 collection, which loads asynchronously and is
+      // near-empty right after ready, so a status posted before connect would silently never reach the
+      // store. Fetching the chat's messages (the same on-demand fetch the chat-history endpoint uses)
+      // reliably returns the currently-active statuses with downloadable media/video, and each maps
+      // through the very buildIncomingStatus the live onMessage path uses — so a seeded status is
+      // indistinguishable from one that arrives live. No status.received webhook is dispatched here:
+      // this is a backfill of posts that predate the connection, not a live arrival.
+      const messages = await engine.getChatHistory('status@broadcast', STATUS_SEED_LIMIT, true);
+      // getChatHistory maps a message's contact from the sync cache only, so status posters (usually
+      // @lid ids) come back nameless. Resolve each unique poster once via getContactById — the same
+      // lookup the contacts API uses, which maps the @lid to the real contact — so a seeded status
+      // carries the poster's name like a live one does. Cached per JID: one lookup per contact, not
+      // one per status.
+      const contactNames = new Map<string, { name?: string; pushName?: string }>();
+      const resolvePoster = async (jid: string): Promise<{ name?: string; pushName?: string }> => {
+        const cached = contactNames.get(jid);
+        if (cached) return cached;
+        let resolved: { name?: string; pushName?: string } = {};
+        try {
+          const contact = await engine.getContactById(jid);
+          if (contact) resolved = { name: contact.name, pushName: contact.pushName };
+        } catch {
+          // Best-effort: a failed lookup just leaves the status nameless.
+        }
+        contactNames.set(jid, resolved);
+        return resolved;
+      };
+      for (const msg of messages) {
+        const status = buildIncomingStatus(msg);
+        if (!status) continue;
+        if (!status.contactName && !status.contactPushName) {
+          const poster = await resolvePoster(status.contactJid);
+          status.contactName = poster.name;
+          status.contactPushName = poster.pushName;
+        }
+        await this.statusStore.ingest(sessionId, status);
       }
     } catch (err) {
       this.logger.debug('Status seed skipped', {
