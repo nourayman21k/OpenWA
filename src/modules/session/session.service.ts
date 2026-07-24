@@ -674,7 +674,8 @@ export class SessionService implements OnModuleDestroy, OnModuleInit, OnApplicat
       // this is a backfill of posts that predate the connection, not a live arrival.
       // Pre-gate media downloads at the store's own cap: a larger blob would be discarded as
       // over_cap on ingest anyway, so downloading it is pure waste (heap + bandwidth).
-      const mediaMaxBytes = this.configService.get<number>('status.mediaMaxBytes', DEFAULT_MEDIA_MAX_BYTES);
+      const mediaMaxBytes =
+        this.configService?.get<number>('status.mediaMaxBytes', DEFAULT_MEDIA_MAX_BYTES) ?? DEFAULT_MEDIA_MAX_BYTES;
       const messages = await engine.getChatHistory('status@broadcast', STATUS_SEED_LIMIT, true, mediaMaxBytes);
       // getChatHistory maps a message's contact from the sync cache only, so status posters (usually
       // @lid ids) come back nameless. Resolve each unique poster once via getContactById — the same
