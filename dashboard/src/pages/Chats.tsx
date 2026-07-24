@@ -82,7 +82,20 @@ interface IncomingWsMessage {
   call?: { video: boolean; missed: boolean };
   metadata?: ChatMessageView['metadata'];
   kind?: ChatKind;
+  /** Group poster: `from` is the group JID, so `contact`/`author` identify who actually sent it. */
+  contact?: { id?: string; name?: string; pushName?: string };
+  author?: string;
 }
+
+// Stable per-sender colour for group message labels, like WhatsApp gives each participant a colour.
+// Hashed from the sender's name so the same person keeps the same colour across a session. The palette
+// is tuned to stay legible on both the light and dark incoming-bubble backgrounds.
+const SENDER_COLORS = ['#d1416f', '#7c5cff', '#0a86c4', '#1a8f5c', '#c26a00', '#c0392b', '#0e7c86', '#8e44ad'];
+const senderColor = (name: string): string => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return SENDER_COLORS[Math.abs(hash) % SENDER_COLORS.length];
+};
 
 // Map an attachment MIME type to the neutral MessageType for the optimistic outgoing bubble, so the
 // placeholder matches what the backend will persist (e.g. a PDF is `document`, not `application`).
@@ -533,6 +546,9 @@ export function Chats() {
         id: newMsg.id,
         waMessageId: newMsg.id,
         chatId: newMsg.chatId,
+        // For a group post `from` is the group JID, so the sender's name is carried on `contact`.
+        // Persisted rows keep the same value in `chatName`; normalize both to one field for the thread.
+        chatName: newMsg.contact?.pushName ?? newMsg.contact?.name,
         from: newMsg.from,
         to: newMsg.to,
         body: newMsg.body,
@@ -1468,10 +1484,21 @@ export function Chats() {
                       <span>{t('chats.noMessagesInChat')}</span>
                     </div>
                   ) : (
-                    messages.map(msg => {
+                    messages.map((msg, index) => {
                       const isMe = msg.direction === 'outgoing';
                       const formattedTime = formatTime(
                         msg.timestamp || Math.floor(new Date(msg.createdAt).getTime() / 1000),
+                      );
+
+                      // Label who posted, WhatsApp-style: only in groups, only on incoming messages,
+                      // and only on the first of a consecutive run from the same sender (so a burst
+                      // from one person isn't repeated on every bubble).
+                      const prev = messages[index - 1];
+                      const showSender = Boolean(
+                        activeChat?.isGroup &&
+                          !isMe &&
+                          msg.chatName &&
+                          (!prev || prev.direction === 'outgoing' || prev.chatName !== msg.chatName),
                       );
 
                       const isMediaMessage = msg.type !== 'text';
@@ -1588,6 +1615,13 @@ export function Chats() {
                                 isMediaMessage ? 'media-type' : ''
                               } ${isRevoked ? 'revoked-type' : ''}`}
                             >
+                              {/* Group sender label (WhatsApp-style: coloured name atop the bubble) */}
+                              {showSender && (
+                                <div className="message-sender" style={{ color: senderColor(msg.chatName!) }}>
+                                  {msg.chatName}
+                                </div>
+                              )}
+
                               {/* Quoted message display */}
                               {msg.metadata?.quotedMessage && (
                                 <div className="message-quote-box">

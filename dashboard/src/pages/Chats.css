@@ -546,6 +546,15 @@
   white-space: pre-wrap;
 }
 
+/* Group sender label: the poster's name atop an incoming group bubble (colour set inline per sender). */
+.chats-page .message-sender {
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-bottom: 0.15rem;
+  word-break: break-word;
+}
+
 .chats-page .message-meta {
   display: flex;
   align-items: center;

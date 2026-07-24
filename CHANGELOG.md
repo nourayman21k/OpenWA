@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read-only viewer for a contact's updates (image and video), and can post a text or image status,
   with a recipient picker on the Baileys engine.
 
+- **Group chats now show who sent each message.** In a group conversation the dashboard labels each
+  incoming message with the sender's name — coloured per participant and shown once per consecutive
+  run — so a thread is no longer an anonymous wall of text. One-to-one chats are unchanged.
+
 ### Fixed
 
 - **Outbound `withSafeFetch` no longer crashes the process on unread webhook response bodies.**

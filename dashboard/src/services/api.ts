@@ -178,6 +178,12 @@ export interface ChatMessage {
   chatId: string;
   /** Chat kind of the source conversation (present on live engine/WS payloads). */
   kind?: ChatKind;
+  /**
+   * Human-readable name of the message's sender. For a group this is the participant who posted
+   * (their pushName/contact name); the chat view uses it to label who said what, like WhatsApp. Null
+   * on legacy rows or when the engine could not resolve a name.
+   */
+  chatName?: string;
   from: string;
   to: string;
   body: string;
@@ -206,6 +212,10 @@ export interface EngineHistoryMessage {
   timestamp: number;
   fromMe?: boolean;
   media?: { mimetype: string; filename?: string; data?: string };
+  /** Sender in a group: `from` is the group JID, so this participant WID is the real poster. */
+  author?: string;
+  /** Best-effort sender contact (sync cache); its name labels the poster in a group thread. */
+  contact?: { id?: string; name?: string; pushName?: string };
 }
 
 // Mirrors the backend engine Channel / ChannelMessage (GET /sessions/:id/channels[/:id/messages]).
