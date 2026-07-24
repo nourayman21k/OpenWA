@@ -382,9 +382,7 @@ describe('withSafeFetch (guarded + pinned fetch)', () => {
     });
     const use = jest.fn();
 
-    await expect(withSafeFetch('https://example.com/hook', {}, use, { guard: true })).rejects.toThrow(
-      SsrfBlockedError,
-    );
+    await expect(withSafeFetch('https://example.com/hook', {}, use, { guard: true })).rejects.toThrow(SsrfBlockedError);
     expect(use).not.toHaveBeenCalled();
     expect(cancel).toHaveBeenCalledTimes(1);
   });

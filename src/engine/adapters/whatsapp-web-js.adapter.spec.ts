@@ -209,6 +209,7 @@ describe('loadRemoteMedia — routes through the SSRF-pinned media fetch', () =>
           cancel: () => Promise.resolve(),
         };
       },
+      cancel: () => Promise.resolve(),
     },
   });
 
