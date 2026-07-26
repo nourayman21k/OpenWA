@@ -14,7 +14,7 @@ FROM --platform=$BUILDPLATFORM docker.io/node:22-slim AS builder
 WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
@@ -53,9 +53,15 @@ FROM docker.io/node:22-slim AS production
 # to avoid the Debian chromium package's K8s SIGTRAP under strict non-root/seccomp;
 # arm64 installs Debian's chromium instead (it ships a native arm64 build). Both
 # resolve to the same /usr/local/bin/puppeteer-chrome symlink below.
+#
+# chromium-sandbox is listed EXPLICITLY (not left to Recommends) so --no-install-recommends still
+# trims every other Recommends but keeps the setuid sandbox binary available. Our default forces
+# --no-sandbox (configuration.ts) so it goes unused, but a user who overrides PUPPETEER_ARGS to drop
+# --no-sandbox would otherwise get a chromium that can't launch. Verified on real arm64 hardware:
+# with --no-install-recommends the package is dropped, and chromium launches fine under --no-sandbox.
 ARG TARGETARCH
-RUN apt-get update && apt-get install -y \
-    $([ "$TARGETARCH" = arm64 ] && echo chromium) \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    $([ "$TARGETARCH" = arm64 ] && echo "chromium chromium-sandbox") \
     fonts-liberation \
     libappindicator3-1 \
     libasound2 \
@@ -150,5 +156,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 # dumb-init is PID 1 and handles signal forwarding.
 # It execs docker-entrypoint.sh (as root), which fixes volume ownership and
 # then drops to the openwa user via gosu before starting the node process.
+#
+# NOTE — no `USER openwa` directive on purpose (Trivy DS-0002 will flag it, ignore).
+# The Node process does NOT run as root: docker-entrypoint.sh:30 is
+# `exec gosu openwa "$@"` after the chowns on lines 7 and 25. Adding `USER openwa`
+# here would run the entrypoint as openwa and break the chown-before-drop pattern
+# that makes named-volume mounts work on first boot (#254, #259).
 ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/main"]
