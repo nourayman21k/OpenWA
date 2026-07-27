@@ -27,6 +27,7 @@ import {
   PluginConfigSchema,
   validateIngressManifest,
   warnUnauthenticatedIngressRoutes,
+  warnUnsignedTimestampRoutes,
 } from './plugin.interfaces';
 import { validatePluginManifest } from './plugin-manifest';
 import { effectiveNetAllow, isNetHostAllowed, performPluginFetch } from './plugin-net';
@@ -412,6 +413,10 @@ export class PluginLoaderService implements OnModuleInit, OnApplicationBootstrap
     // when the operator opted in (otherwise validateIngressManifest above rejected it); the warning
     // reminds them to front the URL with a network/reverse-proxy ACL.
     warnUnauthenticatedIngressRoutes(manifest, this.logger);
+
+    // Same loud-warning treatment for an hmac route whose declared timestamp is not bound into the
+    // signature: freshness is enforced, but an unsigned timestamp lets a replay mint a fresh one.
+    warnUnsignedTimestampRoutes(manifest, this.logger);
 
     // Check if plugin already loaded
     if (this.plugins.has(manifest.id)) {
