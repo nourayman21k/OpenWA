@@ -117,6 +117,15 @@ COPY scripts/postinstall.js scripts/patch-wwebjs-201832.js scripts/wwebjs-201832
 # Install production dependencies only, then apply the backport patcher (needs `patch`).
 RUN npm ci --omit=dev && node scripts/patch-wwebjs-201832.js && npm cache clean --force
 
+# Replace the npm the base image bundles. npm is not on the request path — the entrypoint runs
+# `node dist/main` — but it stays in the image because the operator runbooks drive it
+# (`docker exec openwa npm run cli …`, `npm run export`), and its own bundled dependency tree is
+# what the release image scan reports. node:22-slim currently ships npm 10.9.8, whose bundle
+# carries a critical node-tar advisory plus sigstore/picomatch ones; npm 12 fixes all three.
+# Deliberately AFTER `npm ci`, so the application tree is still resolved by the npm the lockfile
+# was generated with and only the global CLI is swapped.
+RUN npm install -g npm@12 && npm cache clean --force
+
 # amd64: download Chrome for Testing via Puppeteer and symlink it.
 # arm64: use Debian's chromium installed above (CfT has no linux-arm64 build).
 # test -n guards against a future path mismatch failing loudly instead of shipping a broken image.

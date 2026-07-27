@@ -427,6 +427,11 @@ jobs:
       matrix:
         platform: [linux/amd64, linux/arm64]
     steps:
+      # Needed for .trivyignore: the scan reads the image from the registry, but the ignore file
+      # is repo state and trivy-action resolves it from the workspace — without a checkout the
+      # file simply is not there and every entry is silently inert.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4
         with:
@@ -455,6 +460,9 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
+          # Explicit rather than implicit: each entry in .trivyignore carries a written
+          # justification and a condition for removing it.
+          trivyignores: .trivyignore
 
   # Applies the release tags (X.Y.Z — plus X.Y and latest for non-prereleases) to the image
   # boot-smoke just proved can start, on BOTH registries (GHCR + Docker Hub — the tag set computed

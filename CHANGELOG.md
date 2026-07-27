@@ -379,7 +379,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image on both `linux/amd64` and `linux/arm64`, and blocks the `promote` step (which applies the
   `X.Y.Z`/`X.Y`/`latest` tags) on any fixable HIGH/CRITICAL. This covers the Debian packages baked
   into `node:22-slim` — and the arm64-only `chromium` packages — that the source-tree `npm audit`
-  gate cannot see. Runs at release time only, so it never touches fork-PR token permissions.
+  gate cannot see, plus the dependency tree bundled inside the image's own npm CLI: the production
+  image now installs npm 12 over the 10.9.8 the base image ships, clearing a critical `node-tar`
+  advisory along with `sigstore` and `picomatch` ones. A single accepted finding is carried in
+  `.trivyignore` with its justification and the condition for removing it; everything else still
+  blocks promotion. Runs at release time only, so it never touches fork-PR token permissions.
 
 - **Session-scoped API keys can no longer escape their fence through key management or integration instance
   management, and plugin `conversation.send` now verifies the mapping belongs to the envelope's session.**
