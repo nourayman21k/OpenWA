@@ -9,6 +9,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The data export/import path and the backup/restore scripts no longer silently lose data, crash
+  the process, or write databases the app never opens.** Five integrity gaps in the export/import
+  endpoints (`GET /api/infra/export-data`, `POST /api/infra/import-data`, storage archive import)
+  are closed: each optional-table read was wrapped in a blind `try/catch` that debug-logged any
+  failure as "empty table", so a lock/IO/timeout produced an HTTP 200 "complete" backup that the
+  import then treated as authoritative — `DELETE`ing the rows the export never captured (now
+  rethrows everything except a genuine missing-table error, with the skipped tables listed in a new
+  `skippedTables` response field); the Postgres `body_ts` tsvector leaked into message exports via
+  `SELECT *` (now stripped); the `status_updates` table was missing from the backup flow entirely
+  despite the documented "all Data DB tables" contract (now exported/imported); a corrupt gzip or
+  mid-read I/O failure on `importFromStream` raised an unhandled `error` event that killed the
+  server, since neither the gunzip nor the input stream had an error listener (both now fail the
+  import promise and the controller maps it to 400); and the in-memory `lid -> phone` mirror was
+  left stale after a committed restore (now reloaded post-commit). The pre-flight now refuses a
+  full-replace restore that would orphan a running engine with **409 Conflict** listing the affected
+  sessions — pass `stopOrphans: true` to stop them inside the request (preferred), or `force: true`
+  to proceed and leave them running until restart (response carries `restartRequired` /
+  `orphanedEngines` / `stoppedOrphanEngines` / `failedOrphanEngines`). Separately,
+  `scripts/backup.sh` and `scripts/restore.sh` resolved database files from `OPENWA_DATA_DIR`,
+  which the app never reads — it opens `MAIN_DATABASE_NAME` / `DATABASE_NAME` with fixed `./data`
+  defaults — so a custom DB env path made backup exit 0 archiving nothing and restore write
+  databases the app never opened (next boot: fresh-empty, new API keys, new master key). Both
+  scripts now resolve DB paths exactly like the app, fail hard (non-zero + clear message) on a
+  missing source or an incomplete archive, and the production image ships `sqlite3` so in-container
+  backups take online-consistent snapshots via `sqlite3 .backup` (a `CONSISTENCY-WARNING` marker +
+  restore `--strict` gate cover the CLI-absent fallback). A new `Shell scripts` CI job runs the
+  backup/restore smoke suite and shellcheck on every change. **Breaking (behavior):** `backup.sh`
+  now exits non-zero where it previously reported success over an empty/partial archive — scheduled
+  jobs pointed at wrong paths will start alerting — and import/export responses gain additive fields
+  only. (#927, #926)
+
+- **Webhook delivery records now match what actually happened on the wire, and the Redis-backed
+  rate limiter no longer stalls or double-counts during a Redis outage.** On the webhook path, a
+  `lastTriggeredAt` bookkeeping update that threw after a 2xx receiver response used to flip the
+  outcome to failed — BullMQ/direct retry then re-POSTed an already-delivered event and filed a
+  dead-letter row for a successful delivery (the update is now isolated in its own try/catch and
+  the success outcome stands); parked and in-flight direct deliveries used to vanish on shutdown
+  with no record (the dispatch limiter now supports `close()`, `onModuleDestroy` dead-letters
+  parked deliveries, drains in-flight up to `WEBHOOK_SHUTDOWN_DRAIN_MS`, and logs anything still
+  running as abandoned); a BullMQ job that stalled twice failed without calling `process()` and so
+  bypassed the DLQ/metric/hook channels (a new `@OnWorkerEvent('failed')` handler records the same
+  dead-letter row for the stall sentinel); and the `webhook:before` hook could rewrite
+  `event`/`sessionId`/`timestamp`, making the signed body diverge from the `X-OpenWA-*` headers
+  (all identity fields are now re-asserted, and the serialized body is capped at
+  `WEBHOOK_MAX_PAYLOAD_BYTES`, default 1 MiB). On the throttler path, the ioredis client behind the
+  fail-open Redis storage was built with default `enableOfflineQueue: true` and no
+  `onModuleDestroy`/error listener, so a Redis outage queued every command (~8s per increment × 3
+  throttlers = ~24s+ per request) before the fail-open path engaged, resent unfulfilled `INCR`
+  evals after reconnect (double-counting, since `INCR` is not idempotent), and could hang
+  `app.close()` on a half-open socket. The client is now built fail-fast
+  (`enableOfflineQueue: false`, `autoResendUnfulfilledCommands: false`, `commandTimeout: 2000ms`,
+  `maxRetriesPerRequest: null`), owns its lifecycle via a structured error listener and a bounded
+  `quit()`/`disconnect()` drain, and a startup WARN fires when `WEBHOOK_SHUTDOWN_DRAIN_MS` (default
+  5s) is shorter than `WEBHOOK_TIMEOUT` (default 10s) — the cross that silently truncated in-flight
+  deliveries on shutdown. **Breaking (behavior):** legitimately huge webhook payloads above 1 MiB
+  are now recorded as undelivered rather than sent; a Redis answering slower than 2s degrades to
+  fail-open (allow) instead of eventually answering. (#933, #932)
+
 - **A session that exhausts its reconnect budget no longer leaks a concurrency slot or wedge its
   restart.** When a session with a finite `config.maxReconnectAttempts` reached the terminal FAILED
   branch of `scheduleReconnect`, it wrote FAILED but left the dead engine in the in-process map —
@@ -26,6 +84,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fired. FAILED is now in the terminal-status guard, so each terminal status stays exclusive.
 
 ### Security
+
+- **The create-instance and regenerate-secret responses no longer echo plaintext values for
+  secret-flagged config fields, and the whatsapp-web.js engine no longer reports phantom success
+  for operations it never performed.** Two related honesty fixes:
+  `(POST /integration/plugins/:pluginId/instances, …/regenerate-secret)` rendered the raw instance
+  row when `reveal=true`, bypassing `maskedView` — so any config field flagged `secret: true` at any
+  nesting depth (a nested `credentials.apiToken`, an array-row `webhooks[].signingKey`) was returned
+  in plaintext alongside the one-time ingress secret/verifyToken reveal. The view builder now always
+  starts from `maskedView` (fail-closed when the schema is unavailable) and unmasks only the two
+  documented "revealed once" fields. Separately, several whatsapp-web.js adapter methods reported
+  success for work that never happened: `subscribeToChannel` fabricated `{id:"undefined"}` from a
+  boolean return, `add/remove/promote/demoteParticipants` discarded the per-participant outcome
+  (so a 403 not-admin / 404 not-registered / 409 already-member was a plain 2xx), the catalog reads
+  (`getCatalog/getProducts/getProduct`) were phantom stubs returning `null`/`[]`, and a dead
+  Chromium page was folded into a 404/400 not-found. These now answer honestly: 501 for the
+  unwired catalog/subscribe paths, 403 on a total participant refusal or a discarded `false` boolean
+  (subject/description/unsubscribe), 503 with `EngineTransportError` for a transport death, and an
+  additive `results` field on the four participant endpoints carrying the per-participant outcome.
+  `getProfilePicture` received the same transport-death treatment for consistency. **Breaking
+  (behavior):** callers that previously read their own config secret back from the create response
+  now receive `***`, and any client that programmed against a phantom 2xx for the engine operations
+  above will see the new 4xx/5xx where the operation genuinely cannot succeed. Response envelopes
+  are otherwise additive only. (#929, #925)
 
 - **Plugin ingress routes with `signature.scheme: 'none'` now require an explicit opt-in.** A `none`-scheme
   route is an unauthenticated `@Public()` endpoint that, once an integration instance is provisioned
@@ -63,6 +144,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gate cannot see. Runs at release time only, so it never touches fork-PR token permissions.
 
 ### Changed
+
+- **The message `from`-filter now matches group authors, JID candidate expansion is scoped by chat
+  kind, and session delete purges both engines' auth directories.** `GET /api/sessions/:id/messages
+  ?from=<phone>` filtered only the `from` column, but both engine mappers store a group message's
+  real sender in `author` (with the group JID in `from`), so the filter silently skipped every
+  group message that person wrote. It now matches `(message.from IN (:…) OR message.author IN (:…))`
+  against the same lid-expanded candidate set. `resolveJidCandidates` previously expanded ANY filter
+  value into the user dialects and probed the lid table with its digits — so a group/newsletter
+  chatId (`120363…@g.us`, `12345@newsletter`) could mis-resolve onto an unrelated user chat whose
+  phone digits matched, and a `@lid` input never forward-resolved to its phone; candidates are now
+  scoped by `parseWaId` kind (user/unknown keep the expansion, `@lid` forward-resolves via
+  `getCached`, group/status/newsletter/broadcast fail closed on the literal id). Separately,
+  `DELETE /sessions/:id` only purged the currently-active engine's auth directory, so a session
+  that ever ran under both engines (linked on whatsapp-web.js, deployment switched to baileys, or
+  vice versa) kept the other engine's WhatsApp credentials on disk after "delete" — leftovers that
+  could silently re-link on switchback and were carried into backups. `EngineFactory.purgeSessionData`
+  now removes both engine dir shapes (keyed by session name, behind the existing
+  `isSafeSessionName` traversal guard and isolated best-effort per engine); start-time purge is
+  deliberately unchanged so trialling the other engine keeps the previous link for rollback.
+  **Breaking (behavior, from-filter):** filtering `from` by a phone now also returns that person's
+  group messages — consumers that worked around the old miss by filtering client-side will simply
+  see the rows they expected. (#931, #928)
 
 - **Ten operator-tunable environment variables are now documented in `.env.example`.**
   `INGRESS_MAX_ATTEMPTS`, `INGRESS_RETRY_DELAY_MS`, `INGRESS_RETENTION_DAYS`, `SSRF_DNS_TIMEOUT_MS`,
