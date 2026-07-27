@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **S3 storage no longer silently stays on the local fallback after a boot-time miss, the Baileys
+  engine no longer reports READY while its socket is in reconnect backoff, and the dashboard no
+  longer serves cached state across logout.** Four correctness fixes: if S3 was unreachable at boot,
+  `StorageService` fell back to local and never re-probed, so after S3 recovered writes kept landing
+  in `./data/media` while reads hit S3 `NoSuchKey` — a silent split-brain; it now re-probes on a
+  60s interval (`S3_REPROBE_INTERVAL_MS`), WARNs while degraded, self-clears the timer on recovery,
+  and the recovery is strictly one-way (false→true) so a transient flake cannot drop a healthy
+  deployment to local. When the Baileys socket entered reconnect backoff after a transient close,
+  the adapter kept reporting `READY` for up to the 60s backoff cap while the socket was dead, so
+  `probeLiveness()` returned true and `ensureReady()` let sends through against a dead socket — it
+  now sets `INITIALIZING` immediately on the transient close (matching the whatsapp-web.js engine)
+  and restores `READY` on the next `open`. The dashboard's React Query cache survived logout (a
+  re-login showed the previous user's sessions/messages), the startup re-validation did not check
+  `res.ok` (a 401/revoked key kept the cached role), the WebSocket client dropped `subscribed`/
+  `error` frames (a scoped-key `FORBIDDEN_SESSION` was invisible), and `markChatRead` fired per
+  call without a debounce; all four are fixed (`queryClient.clear()` on logout, state-machine
+  validation, frame routing, a 750ms trailing coalescer). Separately, the `tecnativa/docker-socket-proxy`
+  compose entry set `DELETE: 1` which is dead config on the pinned v0.4.2 image (its method gate
+  admits on `POST` alone), so the SECURITY.md "least-privilege" claim oversold the boundary — the
+  dead directive is dropped, the README/SECURITY now document the real threat model (a compromised
+  API container with `POST=1` is host-root-equivalent), and the managed-profile teardown switched
+  from `remove({ v: true })` (which discarded anonymous volumes the disable/re-enable flow assumes)
+  to a stop-only path that reports per-profile errors honestly instead of claiming success on a 403.
+  (#945, #944, #938, #934)
+
 - **The data export/import path and the backup/restore scripts no longer silently lose data, crash
   the process, or write databases the app never opens.** Five integrity gaps in the export/import
   endpoints (`GET /api/infra/export-data`, `POST /api/infra/import-data`, storage archive import)
@@ -85,6 +110,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The HTTP body parser, the WebSocket gateway, and the plugin install path are now bounded against
+  memory-exhaustion and supply-chain attacks, and the dashboard's plugin frame and CSV export no
+  longer leak or inject.** Five hardening fixes: the bootstrap only enforced a **per-request**
+  `BODY_SIZE_LIMIT`, so N concurrent near-limit bodies pinned N×limit bytes before any guard ran
+  (the throttler sits behind the body parser) — a new aggregate in-flight body budget
+  (`INFLIGHT_BODY_BUDGET_BYTES`, default 4× the per-request cap) reserves `Content-Length` at
+  admission and counts chunked bytes per `data` event, rejecting over-budget requests with 503 +
+  `Retry-After` + `Connection: close` (exactly-once release across finish/close/error/abort).
+  The WebSocket gateway had no rate limit on handshakes (every connect did a DB lookup), no per-key
+  socket cap, and no per-frame throttle — an unauthenticated connection flood, a valid-key frame
+  flood, or socket exhaustion were all open; it now enforces three independent limits (per-IP
+  handshake window, per-key socket cap, per-token frame bucket), all memory-bounded by LRU maps
+  with re-insertion-on-touch so an active abuser cannot drift to the LRU head, and a new
+  `RATE_LIMIT_EXCEEDED` audit action is sampled at 1/min/kind+subject so the audit writes cannot
+  themselves become the flood. Plugin install accepted `http://` URLs with no integrity check
+  (MITM-substitutable executable code); the DTO now requires `https` and an optional sha256 pin
+  carried via URL fragment (`#sha256=…`, never sent to the server so a catalog download link can
+  carry it) or query, fail-closed on mismatch/malformed/conflict. The dashboard plugin config UI
+  rendered in an `allow-scripts` sandbox that inherits the dashboard CSP (which allows any `https:`
+  `img-src`/`media-src`) — a meta-CSP (`img-src 'self' data:`, `media-src 'self' data:`,
+  `connect-src 'none'`) is now injected as the frame's first `<head>` element, closing the egress
+  channel `sandbox` alone cannot block. The audit-log CSV export quoted only `,`/`\n`/`"`, so an
+  attacker-influenced string starting with `=`/`+`/`@`/`-` became a formula when an operator opened
+  the export in a spreadsheet — cells are now apostrophe-prefixed before structural quoting.
+  **Breaking (behavior):** legitimate concurrent sends that together exceed the aggregate body
+  budget now get a transient 503 (raise `INFLIGHT_BODY_BUDGET_BYTES`); a frame/handshake/socket
+  that exceeds its limit is closed with a `RATE_LIMIT_EXCEEDED` audit row; a plugin install over
+  `http://` is now rejected (use `https://`); a config-UI plugin that hot-links remote media will
+  render broken until its CSP-compliant equivalent is used. (#936, #937, #942, #939)
+
+- **Release workflows now pin every GitHub Action to a commit SHA and stop re-pointing `:latest` on
+  every main push, and the production Docker build context no longer leaks `.git/`, agent
+  workspaces, stray databases, or `dashboard/node_modules` into image layers.** Two supply-chain
+  fixes: all 61 `uses:` across the workflow files were floating major tags (`@v7`, `@v4`), so a
+  compromised action update silently landed in jobs that handle publish secrets
+  (`docker/login-action`, `setup-java` GPG, `softprops/action-gh-release`, `build-push-action`) —
+  every ref is now pinned to its annotated-tag SHA (verified against `git ls-remote`) with a
+  `# vX.Y.Z` comment that Dependabot reads for monthly bumps. `ci.yml` re-pointed the registry
+  `:latest` tag on **every** main push, but the CI image is build-gated only (never runs the
+  release boot-smoke → promote discipline), so a broken-but-buildable image could become `:latest`;
+  `:latest` now moves only via `release.yml` after boot-smoke passes, a global `concurrency:`
+  group serializes overlapping tag pushes, and the `promote` step guards the mutable channels
+  (digest identity check before any re-point, prerelease minor-tag skip, per-tag post-promotion
+  digest verify). Separately, the `.dockerignore` rejected only root-anchored `node_modules/`,
+  `dist/`, `coverage/`, three `.env*` variants, and `data/` — leaking `.git/`, `dashboard/node_modules`,
+  `dashboard/dist`, `.env.production` / custom `.env` files, `*.sqlite`/`*.db`, `*.tsbuildinfo`, and
+  agent workspaces (`.claude/`, `.agent/`) into the build context and every image layer; the
+  dockerignore is now complete, a `check-dockerignore.mjs` gate (real Docker-matching semantics,
+  29 reject + 16 keep paths) runs as a hard CI gate in both `ci.yml` and `release.yml`, the
+  `postinstall` lifecycle script is extracted to `scripts/postinstall.js` with failure propagation
+  (a broken `dashboard/package-lock.json` or half-applied wwebjs patch now fails `npm install`
+  instead of silently exit 0), and the Dockerfile copies the hook before `npm ci` so the install
+  can find it. **Breaking (behavior):** `docker pull openwa:latest` after a main merge no longer
+  moves the tag — only a tagged release does; `npm install` now fails where it previously reported
+  success over a broken dashboard/patch. (#940, #943)
+
 - **The create-instance and regenerate-secret responses no longer echo plaintext values for
   secret-flagged config fields, and the whatsapp-web.js engine no longer reports phantom success
   for operations it never performed.** Two related honesty fixes:
@@ -144,6 +225,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gate cannot see. Runs at release time only, so it never touches fork-PR token permissions.
 
 ### Changed
+
+- **Dashboard stats aggregates now use a standalone `messages(createdAt)` index and a short TTL
+  memo, and ingress replay/dedup-row growth is now bounded.** The dashboard timeline and stats
+  queries (`getOverview`, `getMessageStats`) filter on `createdAt` alone (`WHERE m.createdAt >=
+  :since`, no `sessionId`), which the existing composite `(sessionId, createdAt)` cannot serve
+  (Postgres has no skip-scan; SQLite without `ANALYZE` full-scans) — a new standalone index
+  `IDX_messages_createdAt` serves the predicate directly (the migration lifts the runtime
+  `statement_timeout` on Postgres to mirror the sibling index migrations), and the per-period
+  aggregates are memoized for `STATS_CACHE_TTL_MS` (default 30s) so a dashboard refresh no longer
+  re-runs the cross-session `GROUP BY` on every call. Separately, ingress replay protection and
+  the dedup-row store grew without bound: a route declaring `timestampHeader` alone hit a freshness
+  trap (the per-route `toleranceSec` was undefined, so the skew check 401'd every delivery), and
+  the full `{headers,query,body,rawBody}` payload (~512 KiB/row) was retained for the full 90-day
+  window — replay windows are now enforced whenever `timestampHeader` is declared, with a host-wide
+  `INGRESS_TIMESTAMP_TOLERANCE_SEC` fallback (default 300s, Standard-Webhooks convention); dedup
+  rows retire to 7 days (`INGRESS_DEDUP_RETENTION_DAYS`) while DLQ rows keep the 90-day compliance
+  window, and the payload is slimmed to NULL the moment an outcome is recorded (a sha256
+  `payloadHash` stays as the permanent fingerprint). The dedup bound is TTL-only (no row cap) — a
+  count cap would evict legit dedup rows under a forged-id flood and re-admit their replays, which
+  the per-instance ingress throttle already bounds. **Breaking (behavior):** dashboard stats now
+  lag by up to `STATS_CACHE_TTL_MS` (default 30s); an ingress route with `timestampHeader` but no
+  per-route `toleranceSec` now accepts deliveries (previously 401'd) using the host-wide default.
+  (#935, #941)
 
 - **The message `from`-filter now matches group authors, JID candidate expansion is scoped by chat
   kind, and session delete purges both engines' auth directories.** `GET /api/sessions/:id/messages
