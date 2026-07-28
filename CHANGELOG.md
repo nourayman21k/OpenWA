@@ -567,7 +567,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller that ingests into a store rather than into one HTTP response — the status seed, which passes its
   own per-item media cap — is budgeted from that cap instead of the response default, so a story feed
   carrying several full-size videos is stored whole while the pass stays bounded.
-  `docs/plans/2026-07-27-wa-version-integrity-options.md` analyzes the structural options for
+  An RFC analyzes the structural options for
   integrity-checking the pinned WhatsApp Web HTML (per-release hash allowlist, signed hash channel/mirror,
   documented accepted-risk, operator pins) and asks the maintainer for a decision; the transparency layer
   (warn log, accurate docs, dashboard source badge) already shipped. (#951, #962)
