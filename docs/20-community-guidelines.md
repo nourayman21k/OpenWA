@@ -493,8 +493,11 @@ This project follows the [all-contributors](https://github.com/all-contributors/
 
 Instead:
 
-1. Email: security@openwa.dev
-2. Use GitHub Security Advisories (private)
+1. GitHub Security Advisories (private) — **preferred**:
+   <https://github.com/rmyndharis/OpenWA/security/advisories/new>
+2. Email: yudhi@rmyndharis.com
+
+See [SECURITY.md](../SECURITY.md) for the authoritative policy.
 
 Include:
 

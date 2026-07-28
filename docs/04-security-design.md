@@ -10,7 +10,7 @@ flowchart TB
         A3[DDoS Attack]
         A4[Injection Attack]
     end
-    
+
     subgraph Defense["Defense Layers"]
         D1[Authentication]
         D2[Encryption]
@@ -18,12 +18,12 @@ flowchart TB
         D4[Input Validation]
         D5[Audit Logging]
     end
-    
+
     A1 --> D1
     A2 --> D2
     A3 --> D3
     A4 --> D4
-    
+
     D1 --> APP[Application]
     D2 --> APP
     D3 --> APP
@@ -41,7 +41,7 @@ sequenceDiagram
     participant G as Auth Guard
     participant S as Service
     participant DB as Database
-    
+
     C->>G: Request + X-API-Key
     G->>G: Hash API Key
     G->>DB: Find by hash
@@ -67,17 +67,17 @@ Storage: SHA-256 hash only (never store plain key)
 
 ### Permission Model
 
-| Permission | Description |
-|------------|-------------|
-| `*` | Full access (admin) |
-| `sessions:read` | View sessions |
-| `sessions:write` | Create/delete sessions |
-| `messages:send` | Send messages |
-| `messages:read` | Read message history |
-| `webhooks:manage` | CRUD webhooks |
-| `contacts:read` | View contacts |
-| `groups:read` | View groups |
-| `groups:write` | Manage groups |
+| Permission        | Description            |
+| ----------------- | ---------------------- |
+| `*`               | Full access (admin)    |
+| `sessions:read`   | View sessions          |
+| `sessions:write`  | Create/delete sessions |
+| `messages:send`   | Send messages          |
+| `messages:read`   | Read message history   |
+| `webhooks:manage` | CRUD webhooks          |
+| `contacts:read`   | View contacts          |
+| `groups:read`     | View groups            |
+| `groups:write`    | Manage groups          |
 
 ## 4.3 IP Whitelisting
 
@@ -104,8 +104,8 @@ flowchart TB
 interface IpWhitelistEntry {
   id: string;
   apiKeyId: string;
-  ipAddress: string;      // Single IP: "203.0.113.50"
-  cidrRange?: string;     // CIDR: "10.0.0.0/24"
+  ipAddress: string; // Single IP: "203.0.113.50"
+  cidrRange?: string; // CIDR: "10.0.0.0/24"
   description?: string;
   active: boolean;
   createdAt: Date;
@@ -136,9 +136,7 @@ PUT  /api/auth/api-keys/:id
 // IP Whitelist Guard
 @Injectable()
 export class IpWhitelistGuard implements CanActivate {
-  constructor(
-    private readonly ipWhitelistService: IpWhitelistService,
-  ) {}
+  constructor(private readonly ipWhitelistService: IpWhitelistService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -157,9 +155,7 @@ export class IpWhitelistGuard implements CanActivate {
     }
 
     // Check if IP matches any whitelist entry
-    const isAllowed = whitelist.some(entry =>
-      this.ipMatches(clientIp, entry)
-    );
+    const isAllowed = whitelist.some(entry => this.ipMatches(clientIp, entry));
 
     if (!isAllowed) {
       throw new ForbiddenException({
@@ -177,9 +173,7 @@ export class IpWhitelistGuard implements CanActivate {
     if (forwarded) {
       return (forwarded as string).split(',')[0].trim();
     }
-    return request.headers['x-real-ip'] as string ||
-           request.socket.remoteAddress ||
-           '';
+    return (request.headers['x-real-ip'] as string) || request.socket.remoteAddress || '';
   }
 
   private ipMatches(clientIp: string, entry: IpWhitelistEntry): boolean {
@@ -204,22 +198,20 @@ export class IpWhitelistGuard implements CanActivate {
   }
 
   private ipToNumber(ip: string): number {
-    return ip.split('.').reduce(
-      (acc, octet) => (acc << 8) + parseInt(octet), 0
-    ) >>> 0;
+    return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
   }
 }
 ```
 
 ### Best Practices
 
-| Practice | Description |
-|----------|-------------|
-| **Use CIDR notation** | For IP ranges, use CIDR instead of multiple entries |
-| **Trusted Proxies** | Configure trusted proxies for accurate client IP |
-| **Regular Review** | Review whitelist entries regularly |
-| **Audit Logging** | Log all blocked attempts for monitoring |
-| **Fallback Plan** | Prepare a process to update the whitelist when IPs change |
+| Practice              | Description                                               |
+| --------------------- | --------------------------------------------------------- |
+| **Use CIDR notation** | For IP ranges, use CIDR instead of multiple entries       |
+| **Trusted Proxies**   | Configure trusted proxies for accurate client IP          |
+| **Regular Review**    | Review whitelist entries regularly                        |
+| **Audit Logging**     | Log all blocked attempts for monitoring                   |
+| **Fallback Plan**     | Prepare a process to update the whitelist when IPs change |
 
 ### IPv6 Support
 
@@ -235,14 +227,14 @@ OpenWA serves plain HTTP on its port; terminate **TLS at your reverse proxy / lo
 
 > **There is currently no application-level encryption at rest.** API keys are stored **hashed** (one-way), but other sensitive values are stored as plaintext in the database / on disk and are protected by filesystem and database permissions, not by encryption. Encryption at rest for these fields is a roadmap item, not a shipped feature — do not assume it.
 
-| Data | At rest | How it is protected |
-|------|---------|---------------------|
-| API keys | **Hashed** — SHA-256 with an optional `API_KEY_PEPPER` HMAC; never reversible | A database leak alone cannot recover the keys; with a pepper set, hashes can't be precomputed offline. See §4.2. |
-| Session auth state (WhatsApp credentials) | Plaintext on disk (the engine's auth store under the data volume) | Filesystem permissions on the data volume — keep it private. |
-| Webhook secrets | Plaintext — `webhooks.secret` (`varchar`) | Database access control; never returned by any API response (write-only response DTO). |
-| Proxy credentials | Plaintext — `sessions.proxyUrl` may embed `user:pass` | Database access control; never returned by the session read DTOs. |
-| Generated config (`data/.env.generated`) | Plaintext file, written `0600` | Owner-only file permissions. |
-| Message content | Plaintext in the `messages` table | Database access control. |
+| Data                                      | At rest                                                                       | How it is protected                                                                                              |
+| ----------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| API keys                                  | **Hashed** — SHA-256 with an optional `API_KEY_PEPPER` HMAC; never reversible | A database leak alone cannot recover the keys; with a pepper set, hashes can't be precomputed offline. See §4.2. |
+| Session auth state (WhatsApp credentials) | Plaintext on disk (the engine's auth store under the data volume)             | Filesystem permissions on the data volume — keep it private.                                                     |
+| Webhook secrets                           | Plaintext — `webhooks.secret` (`varchar`)                                     | Database access control; never returned by any API response (write-only response DTO).                           |
+| Proxy credentials                         | Plaintext — `sessions.proxyUrl` may embed `user:pass`                         | Database access control; never returned by the session read DTOs.                                                |
+| Generated config (`data/.env.generated`)  | Plaintext file, written `0600`                                                | Owner-only file permissions.                                                                                     |
+| Message content                           | Plaintext in the `messages` table                                             | Database access control.                                                                                         |
 
 **Hardening you can apply today:** set `API_KEY_PEPPER`; restrict the data volume and database to the app's user; and encrypt at the infrastructure layer (LUKS / cloud-provider encrypted volumes / an encrypted managed Postgres) rather than relying on application-level field encryption, which is not implemented.
 
@@ -264,13 +256,13 @@ flowchart TB
 
 ### Validation Examples
 
-| Field | Rules |
-|-------|-------|
-| `chatId` | Pattern: `^\d+@(c\.us\|g\.us)$` |
-| `phone` | Pattern: `^\d{10,15}$` |
-| `url` | Valid URL, HTTPS only for webhooks |
-| `text` | Max 4096 chars (`send-text`) |
-| `sessionName` | Alphanumeric + hyphen, 3-50 chars |
+| Field         | Rules                              |
+| ------------- | ---------------------------------- |
+| `chatId`      | Pattern: `^\d+@(c\.us\|g\.us)$`    |
+| `phone`       | Pattern: `^\d{10,15}$`             |
+| `url`         | Valid URL, HTTPS only for webhooks |
+| `text`        | Max 4096 chars (`send-text`)       |
+| `sessionName` | Alphanumeric + hyphen, 3-50 chars  |
 
 ### DTO Validation
 
@@ -309,7 +301,7 @@ flowchart LR
     REQ[Request] --> RL{Rate Limiter}
     RL -->|Under Limit| APP[Application]
     RL -->|Over Limit| ERR[429 Too Many Requests]
-    
+
     subgraph Limits["Global windows (per client IP)"]
         T1[short: 10 / 1s]
         T2[medium: 100 / 60s]
@@ -321,11 +313,11 @@ flowchart LR
 
 All limits are **global and per client IP** (resolved through `TRUSTED_PROXIES`), applied by a global `ThrottlerGuard`. There is **no per-endpoint limit table** — these three windows apply to every non-exempt route, and exceeding any one returns `429 Too Many Requests`:
 
-| Window | Default limit | Window length | Env overrides |
-|--------|---------------|---------------|---------------|
-| `short` | 10 requests | 1 s | `RATE_LIMIT_SHORT_TTL` / `RATE_LIMIT_SHORT_LIMIT` |
-| `medium` | 100 requests | 60 s | `RATE_LIMIT_MEDIUM_TTL` / `RATE_LIMIT_MEDIUM_LIMIT` |
-| `long` | 1000 requests | 3600 s | `RATE_LIMIT_LONG_TTL` / `RATE_LIMIT_LONG_LIMIT` |
+| Window   | Default limit | Window length | Env overrides                                       |
+| -------- | ------------- | ------------- | --------------------------------------------------- |
+| `short`  | 10 requests   | 1 s           | `RATE_LIMIT_SHORT_TTL` / `RATE_LIMIT_SHORT_LIMIT`   |
+| `medium` | 100 requests  | 60 s          | `RATE_LIMIT_MEDIUM_TTL` / `RATE_LIMIT_MEDIUM_LIMIT` |
+| `long`   | 1000 requests | 3600 s        | `RATE_LIMIT_LONG_TTL` / `RATE_LIMIT_LONG_LIMIT`     |
 
 TTL values are in milliseconds. The `/api/metrics` and `/api/health*` routes are exempt (`@SkipThrottle`). To enforce tighter per-route limits, lower the global windows or add a limiter at your reverse proxy.
 
@@ -344,11 +336,11 @@ The API exposes the rate-limit headers via CORS (`exposedHeaders`) so browser cl
 
 Socket.IO frames never pass through the Nest enhancer pipeline, so the HTTP windows above do **not** apply to the WebSocket surface. `EventsGateway` enforces its own in-process limits instead (all keyed in-memory per process; any blank/non-positive/non-numeric env value falls back to the default):
 
-| Limit | Keyed on | Default | Env overrides |
-|-------|----------|---------|---------------|
-| Client frames (subscribe/unsubscribe/ping) — token bucket | API key (IP before auth completes) | 60 frames/s sustained, 120-frame burst | `WS_RATE_LIMIT_FRAME_PER_SECOND` / `WS_RATE_LIMIT_FRAME_BURST` |
-| New handshakes — sliding window, enforced **before** key validation | client IP (resolved through `TRUSTED_PROXIES`) | 10 per 60 s | `WS_RATE_LIMIT_HANDSHAKE_MAX` / `WS_RATE_LIMIT_HANDSHAKE_WINDOW_MS` |
-| Simultaneous sockets | API key | 16 | `WS_MAX_SOCKETS_PER_KEY` |
+| Limit                                                               | Keyed on                                       | Default                                | Env overrides                                                       |
+| ------------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------- |
+| Client frames (subscribe/unsubscribe/ping) — token bucket           | API key (IP before auth completes)             | 60 frames/s sustained, 120-frame burst | `WS_RATE_LIMIT_FRAME_PER_SECOND` / `WS_RATE_LIMIT_FRAME_BURST`      |
+| New handshakes — sliding window, enforced **before** key validation | client IP (resolved through `TRUSTED_PROXIES`) | 10 per 60 s                            | `WS_RATE_LIMIT_HANDSHAKE_MAX` / `WS_RATE_LIMIT_HANDSHAKE_WINDOW_MS` |
+| Simultaneous sockets                                                | API key                                        | 16                                     | `WS_MAX_SOCKETS_PER_KEY`                                            |
 
 The frame budget is sized ~6x above legitimate traffic: the dashboard emits ~8 subscribe frames at page mount and only occasional ping/unsubscribe frames afterwards (server→client event fan-out is not limited). The handshake window stops an unauthenticated connection flood from forcing a DB `validateApiKey` per attempt; Socket.IO's exponential-backoff reconnect (~6 attempts/min per tab) stays under it. The socket cap covers multi-tab dashboards and SDK clients sharing one key. A rejected handshake or excess socket is answered with a `RATE_LIMITED` error frame and a clean disconnect; an over-budget frame gets a `RATE_LIMITED` error frame and is not dispatched. Violations are audited as `rate_limit_exceeded`, sampled to at most one row per subject+kind per minute (suppressed occurrences are counted into the next row) so the audit trail itself cannot become the flood.
 
@@ -361,10 +353,10 @@ The frame budget is sized ~6x above legitimate traffic: the dashboard emits ~8 s
 const corsOptions = {
   origin: (origin, callback) => {
     const allowedOrigins = process.env.CORS_ORIGINS?.split(',') || [];
-    
+
     // Allow requests with no origin (mobile apps, Postman)
     if (!origin) return callback(null, true);
-    
+
     if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
       callback(null, true);
     } else {
@@ -389,7 +381,7 @@ const corsOptions = {
 sequenceDiagram
     participant OW as OpenWA
     participant WH as Webhook Endpoint
-    
+
     OW->>OW: Create payload
     OW->>OW: Sign with HMAC-SHA256
     OW->>WH: POST + X-OpenWA-Signature
@@ -409,20 +401,10 @@ function signPayload(payload: object, secret: string): string {
 }
 
 // Client: Verify signature
-function verifySignature(
-  payload: string,
-  signature: string,
-  secret: string
-): boolean {
-  const expected = 'sha256=' + crypto
-    .createHmac('sha256', secret)
-    .update(payload)
-    .digest('hex');
-  
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expected)
-  );
+function verifySignature(payload: string, signature: string, secret: string): boolean {
+  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(payload).digest('hex');
+
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 }
 ```
 
@@ -431,11 +413,11 @@ function verifySignature(
 A single inbound event is delivered to **every** matching webhook of the session, and media arrives
 from unauthenticated WhatsApp senders — so the copy amplification is bounded at four points:
 
-| Bound | Knob | Default | Behavior |
-| --- | --- | --- | --- |
-| Webhooks per session | `WEBHOOK_MAX_PER_SESSION` | 16 (`0` = unlimited) | Creating a NEW webhook at/over the cap is rejected with `400`; existing webhooks are grandfathered |
-| Inline media in payloads | `WEBHOOK_MEDIA_INLINE_MAX_BYTES` | 1 MiB (`0` = never inline) | Larger media is replaced once, before per-webhook cloning, with `media: { mimetype, filename?, omitted: true, sizeBytes }` |
-| Serialized body size | `WEBHOOK_MAX_PAYLOAD_BYTES` | 1 MiB | Over-budget bodies shed any remaining inline media (marker form) and are re-checked; still over budget → recorded as undelivered, never sent/queued |
+| Bound                         | Knob                                      | Default                            | Behavior                                                                                                                                                                             |
+| ----------------------------- | ----------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Webhooks per session          | `WEBHOOK_MAX_PER_SESSION`                 | 16 (`0` = unlimited)               | Creating a NEW webhook at/over the cap is rejected with `400`; existing webhooks are grandfathered                                                                                   |
+| Inline media in payloads      | `WEBHOOK_MEDIA_INLINE_MAX_BYTES`          | 1 MiB (`0` = never inline)         | Larger media is replaced once, before per-webhook cloning, with `media: { mimetype, filename?, omitted: true, sizeBytes }`                                                           |
+| Serialized body size          | `WEBHOOK_MAX_PAYLOAD_BYTES`               | 1 MiB                              | Over-budget bodies shed any remaining inline media (marker form) and are re-checked; still over budget → recorded as undelivered, never sent/queued                                  |
 | Failed-job retention in Redis | queue `removeOnComplete` / `removeOnFail` | 1h/1000 completed, 24h/5000 failed | Finished jobs auto-evict; payloads were already media-shed before enqueue, so retained jobs stay small. The durable record of a lost delivery is the `webhook_delivery_failures` row |
 
 Each webhook still receives its own copy of the event data — a `webhook:before` hook may mutate
@@ -448,33 +430,35 @@ media shedding, so it is small. The HMAC signature is computed over the exact sh
 
 ```typescript
 // Helmet configuration
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
     },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-  },
-  noSniff: true,
-  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-}));
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+    },
+    noSniff: true,
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  }),
+);
 ```
 
 ### Security Headers Checklist
 
-| Header | Value | Purpose |
-|--------|-------|---------|
-| `Strict-Transport-Security` | `max-age=31536000` | Force HTTPS |
-| `X-Content-Type-Options` | `nosniff` | Prevent MIME sniffing |
-| `X-Frame-Options` | `DENY` | Prevent clickjacking |
-| `X-XSS-Protection` | `1; mode=block` | XSS filter |
-| `Referrer-Policy` | `strict-origin` | Control referrer |
+| Header                      | Value              | Purpose               |
+| --------------------------- | ------------------ | --------------------- |
+| `Strict-Transport-Security` | `max-age=31536000` | Force HTTPS           |
+| `X-Content-Type-Options`    | `nosniff`          | Prevent MIME sniffing |
+| `X-Frame-Options`           | `DENY`             | Prevent clickjacking  |
+| `X-XSS-Protection`          | `1; mode=block`    | XSS filter            |
+| `Referrer-Policy`           | `strict-origin`    | Control referrer      |
 
 ## 4.10 Audit Logging
 
@@ -496,7 +480,7 @@ flowchart TB
         WH[Webhook changes]
         ERR[Security errors]
     end
-    
+
     Events --> LOG[Audit Log]
     LOG --> STORE[(Storage)]
     LOG --> ALERT[Alerts]
@@ -527,12 +511,12 @@ flowchart TB
 
 > **Not implemented.** There is no alerting or automatic temp-block subsystem; the table below is a design target, not shipped behavior. The only related runtime behavior today is a `logger.warn` when an IP-restricted key is used from a disallowed IP. Forward the audit log / application log to your SIEM to build these alerts.
 
-| Event | Severity | Intended action (roadmap) |
-|-------|----------|---------------------------|
-| Multiple failed auth | High | Alert + temp block |
-| Rate limit exceeded | Medium | Log + block |
-| Invalid signature | Medium | Log |
-| Unusual activity | Low | Log |
+| Event                | Severity | Intended action (roadmap) |
+| -------------------- | -------- | ------------------------- |
+| Multiple failed auth | High     | Alert + temp block        |
+| Rate limit exceeded  | Medium   | Log + block               |
+| Invalid signature    | Medium   | Log                       |
+| Unusual activity     | Low      | Log                       |
 
 ## 4.11 Security Checklist
 
@@ -568,14 +552,14 @@ flowchart TB
 
 ### Secrets Inventory
 
-| Secret | Storage | Rotation guidance |
-|--------|---------|-------------------|
-| Database credentials | Environment variable | 90 days |
-| Redis password | Environment variable | 90 days |
-| API master key (`API_MASTER_KEY`) | Environment variable | 180 days |
-| API key pepper (`API_KEY_PEPPER`) | Environment variable | Rotating it invalidates all existing key hashes |
-| Webhook secrets | Database — **plaintext**; never returned by the API | Per webhook |
-| Session auth state | File system (data volume) — **not encrypted** | Never (tied to the WA session) |
+| Secret                            | Storage                                             | Rotation guidance                               |
+| --------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| Database credentials              | Environment variable                                | 90 days                                         |
+| Redis password                    | Environment variable                                | 90 days                                         |
+| API master key (`API_MASTER_KEY`) | Environment variable                                | 180 days                                        |
+| API key pepper (`API_KEY_PEPPER`) | Environment variable                                | Rotating it invalidates all existing key hashes |
+| Webhook secrets                   | Database — **plaintext**; never returned by the API | Per webhook                                     |
+| Session auth state                | File system (data volume) — **not encrypted**       | Never (tied to the WA session)                  |
 
 > There is no application `ENCRYPTION_KEY` — OpenWA does not encrypt data at rest (see §4.4). The rotation cadences above are operational recommendations, not enforced by the app.
 
@@ -634,13 +618,13 @@ export function getSecret(name: string): string {
   if (filePath && existsSync(filePath)) {
     return readFileSync(filePath, 'utf8').trim();
   }
-  
+
   // Fall back to environment variable
   const envValue = process.env[name];
   if (!envValue) {
     throw new Error(`Secret ${name} not configured`);
   }
-  
+
   return envValue;
 }
 
@@ -665,25 +649,22 @@ flowchart TB
 
 ```typescript
 // Key rotation for encrypted data
-async function rotateEncryptionKey(
-  oldKey: string,
-  newKey: string
-): Promise<void> {
+async function rotateEncryptionKey(oldKey: string, newKey: string): Promise<void> {
   // 1. Get all encrypted records
   const sessions = await sessionRepo.find();
-  
+
   for (const session of sessions) {
     // 2. Decrypt with old key
     const authState = decrypt(session.authState, oldKey);
-    
+
     // 3. Re-encrypt with new key
     session.authState = encrypt(authState, newKey);
-    
+
     await sessionRepo.save(session);
   }
-  
-  logger.log('Key rotation completed', { 
-    recordsUpdated: sessions.length 
+
+  logger.log('Key rotation completed', {
+    recordsUpdated: sessions.length,
   });
 }
 ```
@@ -709,21 +690,21 @@ npm audit --json > audit-report.json
 # .github/dependabot.yml
 version: 2
 updates:
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: 'weekly'
+      day: 'monday'
     open-pull-requests-limit: 10
     groups:
       development-dependencies:
-        dependency-type: "development"
+        dependency-type: 'development'
       production-dependencies:
-        dependency-type: "production"
+        dependency-type: 'production'
     ignore:
       # Major version updates require manual review
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
 ```
 
 ### Security Scanning in CI
@@ -738,32 +719,32 @@ on:
   push:
     branches: [main, develop]
   schedule:
-    - cron: '0 0 * * 1'  # Weekly on Monday
+    - cron: '0 0 * * 1' # Weekly on Monday
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          
+
       - name: Install dependencies
         run: npm ci
-        
+
       - name: Run npm audit
         run: npm audit --audit-level=high
-        
+
       - name: Run Snyk security scan
         uses: snyk/actions/node@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
           args: --severity-threshold=high
-          
+
       - name: SAST with CodeQL
         uses: github/codeql-action/analyze@v2
 ```
@@ -785,23 +766,23 @@ jobs:
 
 ### Vulnerability Response Matrix
 
-| Severity | Response Time | Action |
-|----------|---------------|--------|
-| Critical | 24 hours | Immediate patch or disable |
-| High | 72 hours | Patch in next release |
-| Medium | 2 weeks | Plan for next sprint |
-| Low | 1 month | Backlog item |
+| Severity | Response Time | Action                     |
+| -------- | ------------- | -------------------------- |
+| Critical | 24 hours      | Immediate patch or disable |
+| High     | 72 hours      | Patch in next release      |
+| Medium   | 2 weeks       | Plan for next sprint       |
+| Low      | 1 month       | Backlog item               |
 
 ## 4.14 Incident Response
 
 ### Incident Severity Levels
 
-| Level | Description | Example | Response Time |
-|-------|-------------|---------|---------------|
-| P1 - Critical | Service down, data breach | Auth bypass, data leak | 15 minutes |
-| P2 - High | Major feature broken | Session creation fails | 1 hour |
-| P3 - Medium | Partial degradation | Slow webhook delivery | 4 hours |
-| P4 - Low | Minor issue | UI glitch | 24 hours |
+| Level         | Description               | Example                | Response Time |
+| ------------- | ------------------------- | ---------------------- | ------------- |
+| P1 - Critical | Service down, data breach | Auth bypass, data leak | 15 minutes    |
+| P2 - High     | Major feature broken      | Session creation fails | 1 hour        |
+| P3 - Medium   | Partial degradation       | Slow webhook delivery  | 4 hours       |
+| P4 - Low      | Minor issue               | UI glitch              | 24 hours      |
 
 ### Incident Response Flow
 
@@ -821,30 +802,35 @@ flowchart TB
 
 ```markdown
 ## Immediate Actions (First 15 Minutes)
+
 - [ ] Confirm incident is real (not false positive)
 - [ ] Assess severity level
 - [ ] Create incident channel/thread
 - [ ] Assign incident commander
 
 ## Containment (First Hour)
+
 - [ ] Identify affected systems
 - [ ] Isolate compromised components
 - [ ] Preserve evidence (logs, snapshots)
 - [ ] Block attacker if identified
 
 ## Investigation
+
 - [ ] Timeline of events
 - [ ] Entry point identification
 - [ ] Scope of compromise
 - [ ] Data accessed/exfiltrated
 
 ## Recovery
+
 - [ ] Patch vulnerability
 - [ ] Reset compromised credentials
 - [ ] Restore from clean backup if needed
 - [ ] Verify system integrity
 
 ## Post-Incident
+
 - [ ] Document lessons learned
 - [ ] Update security controls
 - [ ] Notify affected users if required
@@ -853,29 +839,34 @@ flowchart TB
 
 ### Emergency Contacts
 
+A template for an operator to fill in and keep outside the repository — OpenWA ships no
+`config/incident-response.yml` and reads no such file. The only contact the project itself
+publishes is the vulnerability-reporting channel in [SECURITY.md](../SECURITY.md); the on-call,
+channel and status-page entries below are placeholders with no upstream default.
+
 ```yaml
-# config/incident-response.yml
+# config/incident-response.yml — operator-supplied, not shipped
 contacts:
   primary_oncall:
-    name: "On-Call Engineer"
-    phone: "+62xxx"
-    slack: "@oncall"
-    
+    name: 'On-Call Engineer'
+    phone: '+62xxx'
+    slack: '@oncall'
+
   security_lead:
-    name: "Security Lead"
-    email: "security@openwa.dev"
-    
+    name: 'Security Lead'
+    email: 'yudhi@rmyndharis.com'
+
   escalation:
     - level: 1
       wait: 15m
       contact: primary_oncall
-    - level: 2  
+    - level: 2
       wait: 30m
       contact: security_lead
 
 communication:
-  internal_channel: "#incident-response"
-  status_page: "https://status.openwa.dev"
+  internal_channel: '' # e.g. a chat channel you own
+  status_page: '' # e.g. a status page you own; the project publishes none
 ```
 
 ### Runbooks
@@ -884,18 +875,21 @@ communication:
 ## Runbook: Suspected Data Breach
 
 ### Detection Signals
+
 - Unusual API access patterns
 - Large data exports
 - Authentication from new locations
 - Failed auth attempts spike
 
 ### Immediate Steps
+
 1. Rotate all API keys for affected accounts
 2. Enable IP whitelisting if not already
 3. Check audit logs for scope
 4. Snapshot affected database
 
 ### Evidence Collection
+
 - Capture the audit log (the `audit_logs` table / audit query API) and the application logs (`docker compose logs openwa`) — there is no `logs:export` script
 - Database query logs
 - Network traffic captures
@@ -913,42 +907,51 @@ communication:
 **Author:** [Name]
 
 ## Summary
+
 Brief description of what happened.
 
 ## Impact
+
 - Users affected: X
 - Data compromised: None/Partial/Full
 - Revenue impact: $X
 
 ## Timeline
-| Time (UTC) | Event |
-|------------|-------|
-| 10:00 | Alert triggered |
-| 10:05 | Incident confirmed |
-| 10:15 | Containment started |
-| 11:00 | Root cause identified |
-| 12:00 | Service restored |
+
+| Time (UTC) | Event                 |
+| ---------- | --------------------- |
+| 10:00      | Alert triggered       |
+| 10:05      | Incident confirmed    |
+| 10:15      | Containment started   |
+| 11:00      | Root cause identified |
+| 12:00      | Service restored      |
 
 ## Root Cause
+
 Technical explanation of what went wrong.
 
 ## What Went Well
+
 - Detection was quick
 - Communication was clear
 
 ## What Went Wrong
+
 - Missing monitoring for X
 - Delayed response due to Y
 
 ## Action Items
-| Item | Owner | Due Date | Status |
-|------|-------|----------|--------|
-| Add monitoring for X | @eng | 2026-02-15 | Open |
-| Update runbook | @security | 2026-02-10 | Open |
+
+| Item                 | Owner     | Due Date   | Status |
+| -------------------- | --------- | ---------- | ------ |
+| Add monitoring for X | @eng      | 2026-02-15 | Open   |
+| Update runbook       | @security | 2026-02-10 | Open   |
 
 ## Lessons Learned
+
 Key takeaways for preventing future incidents.
 ```
+
 ---
 
 <div align="center">
