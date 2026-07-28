@@ -49,7 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which the gateway has. Two risk-register rows that claimed send-rate safeguards now describe the
   controls that ship. Structurally, `docs/23-plugin-sandboxing.md` becomes `docs/30`, resolving a
   duplicate prefix; the engine capability matrix joins the sequence as `docs/29`; a language-forked
-  second copy of the Docker guide is removed; and the index lists all thirty documents.
+  second copy of the Docker guide is removed; and the index lists all thirty documents. Separately,
+  the community guidelines and the incident-response template both published a security contact
+  address that does not exist, so a vulnerability report sent by either route reached no maintainer;
+  both now carry the channels `SECURITY.md` defines, GitHub Security Advisories first.
 
 - **A source install without the GNU `patch` binary no longer silently ships an unpatched
   whatsapp-web.js.** OpenWA backports the fix for the WhatsApp Web 2.3000.x message-id rename during
