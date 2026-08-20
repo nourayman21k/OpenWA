@@ -1,5 +1,6 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import { IngressSignatureSpec } from '../../core/plugins/plugin.interfaces';
+import { constantTimeEqual } from '../../common/security/constantTimeEqual';
 
 export interface VerifyInput {
   rawBody: string;
@@ -12,9 +13,78 @@ export interface VerifyInput {
   instanceId: string;
 }
 
+/**
+ * The replay window applied when a route declares a timestamp but no explicit `toleranceSec`
+ * (standard-webhooks included — the spec fixes the wire format, not the window). Default 300s,
+ * matching the Standard Webhooks convention; INGRESS_TIMESTAMP_TOLERANCE_SEC tunes it host-wide.
+ * An invalid value (non-integer or <= 0 — a zero window would reject every delivery) falls back
+ * to the default, mirroring the other INGRESS_* option resolvers.
+ */
+export function resolveIngressTimestampToleranceSec(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number(env.INGRESS_TIMESTAMP_TOLERANCE_SEC);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 300;
+}
+
 function header(headers: Record<string, string>, name?: string): string | undefined {
   if (!name) return undefined;
   return headers[name.toLowerCase()];
+}
+
+/**
+ * Parse a Standard Webhooks secret to its raw base64 key material: 'v1,whsec_<b64>' → '<b64>',
+ * 'whsec_<b64>' → '<b64>', '<b64>' → '<b64>'. Returns undefined when the secret is empty or prefix-only.
+ * Ported from supabase-otp-hook/verify.ts (do not diverge). Idiomatic change vs the reference: no try/catch
+ * around Buffer.from — Node's base64 decode is lenient and never throws; the key.length===0 guard is the check.
+ */
+function parseWebhookSecret(secret: string): string | undefined {
+  let s = secret.trim();
+  if (s.startsWith('v1,')) s = s.slice(3); // secret version tag (may be absent)
+  if (s.startsWith('whsec_')) s = s.slice(6); // symmetric-key marker
+  return s.length > 0 ? s : undefined;
+}
+
+/**
+ * Verify a Standard Webhooks signature. The wire format is fixed by the spec, so only `toleranceSec`
+ * (falling back to resolveIngressTimestampToleranceSec, default 300) applies —
+ * header/contentTemplate/encoding/prefix/timestampHeader are ignored. The
+ * signature header may carry multiple space-separated `v1,` candidates (key rotation); any match passes.
+ * Pure and total: never throws. Ported from supabase-otp-hook/verify.ts; idiomatic changes: reuse the
+ * existing safeEqualStr (identical to the reference's safeEqual) and the lowercasing `header()` helper
+ * (the reference lowercases separately — OpenWA already delivers lowercased keys).
+ */
+function verifyStandardWebhooks(spec: IngressSignatureSpec, input: VerifyInput): { ok: boolean; reason?: string } {
+  const keyB64 = parseWebhookSecret(input.secret);
+  if (!keyB64) return { ok: false, reason: 'empty standard-webhooks secret' };
+
+  const key = Buffer.from(keyB64, 'base64');
+  if (key.length === 0) return { ok: false, reason: 'standard-webhooks secret decodes to empty key' };
+
+  const id = header(input.headers, 'webhook-id');
+  const tsRaw = header(input.headers, 'webhook-timestamp');
+  const sigHeader = header(input.headers, 'webhook-signature');
+  if (!id || !tsRaw || !sigHeader) {
+    return { ok: false, reason: 'missing webhook-id/webhook-timestamp/webhook-signature header' };
+  }
+
+  const ts = Number.parseInt(tsRaw, 10);
+  if (!Number.isFinite(ts)) return { ok: false, reason: 'invalid webhook-timestamp' };
+
+  const tolerance = spec.toleranceSec ?? resolveIngressTimestampToleranceSec();
+  const skewSec = Math.abs(input.now / 1000 - ts);
+  if (skewSec > tolerance) return { ok: false, reason: 'replay: timestamp outside tolerance' };
+
+  // Standard Webhooks signs `${webhook-id}.${webhook-timestamp}.${rawBody}` with the base64-decoded key.
+  const signed = `${id}.${tsRaw}.${input.rawBody}`;
+  const expected = createHmac('sha256', key).update(signed).digest('base64');
+
+  // The signature header is a space-separated list of `version,signature` candidates; accept the first v1 match.
+  for (const candidate of sigHeader.split(' ')) {
+    const comma = candidate.indexOf(',');
+    if (comma < 0) continue;
+    if (candidate.slice(0, comma) !== 'v1') continue;
+    if (safeEqualStr(candidate.slice(comma + 1), expected)) return { ok: true };
+  }
+  return { ok: false, reason: 'webhook-signature mismatch' };
 }
 
 /**
@@ -29,12 +99,20 @@ export function verifyIngressSignature(
   if (spec.scheme === 'none') return { ok: true };
   if (!input.secret) return { ok: false, reason: 'empty ingress secret' };
 
+  if (spec.scheme === 'standard-webhooks') return verifyStandardWebhooks(spec, input);
+
   if (spec.timestampHeader) {
     const tsRaw = header(input.headers, spec.timestampHeader);
     const ts = Number.parseInt(tsRaw ?? '', 10);
     if (!Number.isFinite(ts)) return { ok: false, reason: 'missing/invalid timestamp' };
+    // Freshness is ALWAYS enforced once a timestamp header is declared: a declared header with no
+    // toleranceSec falls back to the host default (previously such a route rejected every delivery —
+    // an undeclarable trap). Declaring the header without signing it (`{timestamp}` absent from the
+    // contentTemplate) still lets a replay mint a fresh unsigned timestamp, so the loader warns on
+    // that combination (see warnUnsignedTimestampRoutes).
+    const toleranceSec = spec.toleranceSec ?? resolveIngressTimestampToleranceSec();
     const skewSec = Math.abs(input.now / 1000 - ts);
-    if (!(spec.toleranceSec && skewSec <= spec.toleranceSec)) {
+    if (skewSec > toleranceSec) {
       return { ok: false, reason: 'replay: timestamp outside tolerance' };
     }
   }
@@ -65,9 +143,11 @@ export function verifyIngressSignature(
   return safeEqualStr(provided, expected) ? { ok: true } : { ok: false, reason: 'hmac mismatch' };
 }
 
+/**
+ * Constant-time string equality that does not leak the expected value's length.
+ * Kept as a named export for the ingress call sites; delegates to the shared helper so the metrics
+ * token compare and the ingress signature compares stay in lockstep.
+ */
 export function safeEqualStr(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ba.length !== bb.length) return false;
-  return timingSafeEqual(ba, bb);
+  return constantTimeEqual(a, b);
 }

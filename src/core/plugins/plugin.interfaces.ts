@@ -166,10 +166,24 @@ export const PluginCapabilityPermission = {
   ENGINE_READ: 'engine:read',
   /** `ctx.net.fetch` — SSRF-guarded outbound HTTP, scoped to the manifest `net.allow` host list. */
   NET_FETCH: 'net:fetch',
+  /**
+   * `ctx.storage.*` — per-plugin key/value persistence on the host disk (get / set / delete / list).
+   * The per-plugin directory, the key-shape check and the byte quota already bound what a plugin can
+   * reach, so this is a DECLARATION boundary rather than a containment one: without it a manifest
+   * declaring no permissions at all still wrote to disk, and the operator reading that manifest had
+   * no way to see it.
+   */
+  STORAGE_USE: 'storage:use',
   /** `ctx.registerWebhook` — claim an inbound ingress route. Loader-enforced; cannot be widened by config. */
   WEBHOOK_INGRESS: 'webhook:ingress',
   /** `ctx.conversations.send` — normalized outbound send translated to MessageService. */
   CONVERSATION_SEND: 'conversation:send',
+  /**
+   * `ctx.registerSearchProvider` — serve the gateway's /search queries. Under the default
+   * SEARCH_PROVIDER=auto a registered provider is also made ACTIVE, superseding builtin-fts, so an
+   * undeclared plugin would otherwise see every search query the gateway serves.
+   */
+  SEARCH_PROVIDE: 'search:provide',
 } as const;
 export type PluginCapabilityPermission = (typeof PluginCapabilityPermission)[keyof typeof PluginCapabilityPermission];
 
@@ -179,14 +193,28 @@ export type PluginCapabilityPermission = (typeof PluginCapabilityPermission)[key
 
 /** How an inbound webhook's authenticity is established before the plugin sees it. */
 export interface IngressSignatureSpec {
-  scheme: 'hmac-sha256' | 'shared-secret' | 'none';
+  /**
+   * - `hmac-sha256`: HMAC over a `contentTemplate` (tokens `{rawBody}`/`{timestamp}`/`{id}`).
+   * - `shared-secret`: constant-time compare of a header value against `instance.secret`.
+   * - `standard-webhooks`: host-side [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks)
+   *   verify. The wire format is fixed by the spec (headers `webhook-id`/`webhook-timestamp`/
+   *   `webhook-signature`, signed content `${webhook-id}.${webhook-timestamp}.${rawBody}`, base64
+   *   HMAC-SHA256 with the base64-decoded Svix key, `v1,` prefix, space-separated candidate list), so
+   *   `header`/`contentTemplate`/`encoding`/`prefix`/`timestampHeader` are IGNORED — only
+   *   `toleranceSec` (falling back to the host default, itself 300) and `dedupHeader` apply. The
+   *   operator pastes the Svix secret (`v1,whsec_<base64>`) as `instance.secret`.
+   */
+  scheme: 'hmac-sha256' | 'shared-secret' | 'standard-webhooks' | 'none';
   header?: string;
   // Template over which the HMAC is computed. `{rawBody}` `{timestamp}` `{id}` placeholders.
   contentTemplate?: string;
   encoding?: 'hex' | 'base64';
   prefix?: string;
   timestampHeader?: string;
-  toleranceSec?: number; // when present, must be > 0 (see validateIngressManifest)
+  // Replay window for the declared timestampHeader. When absent, the host default applies
+  // (INGRESS_TIMESTAMP_TOLERANCE_SEC, default 300) — freshness is enforced either way; an explicit
+  // value only narrows/widens the window. When present, must be > 0 (see validateIngressManifest).
+  toleranceSec?: number;
   dedupHeader?: string;
 }
 
@@ -197,18 +225,52 @@ export interface IngressChallengeSpec {
   echoParam: string;
 }
 
+/** A host-side preflight check on an inbound route, evaluated AFTER signature verify and BEFORE the
+ *  dedup persist. First failure short-circuits to its mapped HTTP status. O(1), never initializes the
+ *  engine, never mutates state. */
+export type IngressPreflightCheck = {
+  // Reject (503) when the route's concrete-scoped WhatsApp session is not alive (no live engine, or
+  // EngineStatus.FAILED). Recoverable statuses (INITIALIZING/QR_READY/AUTHENTICATING/DISCONNECTED) and
+  // READY pass through to a normal 202+enqueue so the worker can fail fast and the dedup row holds the
+  // delivery. Skipped for wildcard (sessionScope null/'*') scopes — there is no single session to probe.
+  type: 'session-alive';
+};
+
+/** Declares the synchronous HTTP response an inbound route returns to the provider, computed entirely
+ *  host-side. The plugin ALWAYS runs async (enqueued, full DLQ/retry) regardless of this contract. */
+export interface IngressResponseContract {
+  preflight?: IngressPreflightCheck[];
+  ack?: {
+    status?: number; // default 202
+    body?: string; // literal, or a '{rawBody}'/'{timestamp}'/'{id}' template rendered host-side
+    headers?: Record<string, string>; // static; validated at load (HTTP-token name, no CR/LF value)
+  };
+  deadlineMs?: number; // documented provider ack budget (advisory; not enforced)
+}
+
 /** One inbound webhook route a plugin claims. Requires the `webhook:ingress` permission. */
 export interface PluginIngressRoute {
   route: string; // host prefixes it; the plugin never binds a port
+  /**
+   * @deprecated 'sync-reply' is inert dead code since the P0 substrate (#568) and is NOT wired to the
+   * HTTP response — the pipeline is always async + fast-ack. Declare synchronous response behavior via
+   * `response` instead. Kept in the union only to preserve SDK v1 additive-only compatibility; do not
+   * remove within major 1, and do not rely on either value at runtime.
+   */
   mode: 'async' | 'sync-reply';
   signature: IngressSignatureSpec;
   challenge?: IngressChallengeSpec;
+  /** Reserved/advisory compatibility field. Authenticity is currently verified by the host according
+   *  to `signature`; the worker does not perform an additional `self` verification pass. */
   verify: 'core' | 'self';
   maxBodyBytes: number;
   // Optional: where the provider's conversation id lives, so the host can compute a per-conversation
   // ordering key (P1). Absent => the P1 lock falls back to per-instance serialization. The host never
   // needs to understand the provider's schema beyond this one pointer.
   conversationId?: { header?: string; jsonPointer?: string };
+  /** Optional synchronous-response contract (host-side preflight + ack). Additive; absent = today's
+   *  default 202 fast-ack, byte-identical. Validated by validateIngressManifest. */
+  response?: IngressResponseContract;
 }
 
 // Normalized outbound envelope for ctx.conversations.send (POJO across the wire).
@@ -220,19 +282,40 @@ export interface ConversationSendEnvelope {
   text?: string;
   mediaUrl?: string;
   replyTo?: string;
+  /**
+   * Ask the engine for a link preview on a plain text send. Baileys generates one only when this is
+   * `true`, so a plugin relaying a URL gets a bare link without it; whatsapp-web.js previews by
+   * default and takes `false` to suppress. Ignored on media, location and quoted sends, which route
+   * through engine paths that take no preview option.
+   */
+  linkPreview?: boolean;
+  /** WGS84 coordinates; required for type 'location', ignored otherwise. `text` doubles as the
+   *  location description. */
+  latitude?: number;
+  longitude?: number;
   source?: { provider: string; externalConversationId: string };
 }
 
 /** Integration SDK major version this host supports. A plugin whose `sdkVersion` major differs is refused. */
 export const SUPPORTED_SDK_MAJOR = 1;
 
+// ack header guards: name must be an RFC 7230 token (no spaces/separators), value must contain no
+// CR/LF (header-injection guard). The header source is the static manifest, validated once at load.
+const HTTP_HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const HTTP_HEADER_VALUE_NO_CRLF = /^[^\r\n]*$/;
+
 /**
  * Validates a manifest's `ingress` declarations: SDK major compatibility, the `webhook:ingress`
- * permission, route uniqueness, and that a declared `toleranceSec` is usable (> 0 — a replay window
- * of zero or less would make the tolerance check a no-op). A manifest with no `ingress` entries is a
- * no-op. Called from PluginLoaderService.loadPlugin, so a malformed declaration is rejected at load time.
+ * permission, route uniqueness, that a declared `toleranceSec` is usable (> 0 — a replay window
+ * of zero or less would make the tolerance check a no-op), and that no route declares
+ * `signature.scheme: 'none'` unless the operator has explicitly opted in via
+ * `ALLOW_UNSIGNED_INGRESS=true`. A `none`-scheme route is a fully-unauthenticated `@Public()`
+ * endpoint — once an instance is provisioned, anyone who can reach the host can POST a forged
+ * payload that triggers outbound WhatsApp sends. Rejecting it at load (rather than only warning)
+ * keeps that surface from lighting up silently. A manifest with no `ingress` entries is a no-op.
+ * Called from PluginLoaderService.loadPlugin, so a malformed declaration is rejected at load time.
  */
-export function validateIngressManifest(manifest: PluginManifest): void {
+export function validateIngressManifest(manifest: PluginManifest, allowUnsignedIngress = false): void {
   if (!manifest.ingress?.length) return; // no ingress declared → nothing to validate
   const declaredMajor = Number.parseInt((manifest.sdkVersion ?? '1').split('.')[0], 10);
   if (!Number.isFinite(declaredMajor) || declaredMajor !== SUPPORTED_SDK_MAJOR) {
@@ -242,7 +325,10 @@ export function validateIngressManifest(manifest: PluginManifest): void {
   }
   const perms = manifest.permissions ?? [];
   if (!perms.includes(PluginCapabilityPermission.WEBHOOK_INGRESS)) {
-    throw new Error(`Plugin ${manifest.id}: declares ingress routes but is missing the 'webhook:ingress' permission`);
+    throw new Error(
+      `Plugin ${manifest.id}: declares ingress routes but is missing the 'webhook:ingress' permission. ` +
+        `Add "webhook:ingress" to the "permissions" array in the plugin's manifest.json.`,
+    );
   }
   const seen = new Set<string>();
   for (const r of manifest.ingress) {
@@ -250,20 +336,50 @@ export function validateIngressManifest(manifest: PluginManifest): void {
       throw new Error(`Plugin ${manifest.id}: duplicate or empty ingress route '${r.route}'`);
     }
     seen.add(r.route);
+    if (r.signature.scheme === 'none' && !allowUnsignedIngress) {
+      throw new Error(
+        `Plugin ${manifest.id}: ingress route '${r.route}' declares signature.scheme 'none', which is an ` +
+          `unauthenticated public endpoint that can trigger WhatsApp sends. Set ALLOW_UNSIGNED_INGRESS=true to ` +
+          `opt in (and front the route with a network/reverse-proxy ACL).`,
+      );
+    }
     if (r.signature.toleranceSec !== undefined && r.signature.toleranceSec <= 0) {
       throw new Error(
         `Plugin ${manifest.id}: route '${r.route}' toleranceSec must be > 0 (a replay guard would be a no-op)`,
       );
+    }
+    if (r.response) {
+      const ackStatus = r.response.ack?.status;
+      if (ackStatus !== undefined && (!Number.isInteger(ackStatus) || ackStatus < 100 || ackStatus > 599)) {
+        throw new Error(
+          `Plugin ${manifest.id}: route '${r.route}' response.ack.status must be a valid HTTP status (100-599)`,
+        );
+      }
+      if (r.response.ack?.headers) {
+        for (const [name, value] of Object.entries(r.response.ack.headers)) {
+          if (!HTTP_HEADER_NAME.test(name)) {
+            throw new Error(
+              `Plugin ${manifest.id}: route '${r.route}' response.ack header name '${name}' is not a valid HTTP token`,
+            );
+          }
+          if (!HTTP_HEADER_VALUE_NO_CRLF.test(value)) {
+            throw new Error(
+              `Plugin ${manifest.id}: route '${r.route}' response.ack header '${name}' has invalid characters (CR/LF forbidden)`,
+            );
+          }
+        }
+      }
     }
   }
 }
 
 /**
  * Warns about each ingress route declared with `scheme: 'none'` — a fully-unauthenticated public endpoint
- * that anyone who can reach the host can use to trigger WhatsApp sends. Purely additive (a warning): a
- * deployment that legitimately relies on scheme:'none' (a provider that offers no HMAC) still boots; the
- * loud log surfaces the exposure so an operator can front the URL with a network/reverse-proxy guard.
- * Called from PluginLoaderService.loadPlugin at boot and on dynamic install.
+ * that anyone who can reach the host can use to trigger WhatsApp sends. Such a route only loads when the
+ * operator has opted in via `ALLOW_UNSIGNED_INGRESS=true` (otherwise `validateIngressManifest` rejects it);
+ * this warning keeps the exposure loud at boot and on dynamic install so an operator who enabled the flag
+ * for one provider is reminded to front the URL with a network/reverse-proxy ACL.
+ * Called from PluginLoaderService.loadPlugin.
  */
 export function warnUnauthenticatedIngressRoutes(
   manifest: PluginManifest,
@@ -276,6 +392,43 @@ export function warnUnauthenticatedIngressRoutes(
           `UNAUTHENTICATED public endpoint that can trigger WhatsApp sends. Only keep this if the provider ` +
           `offers no HMAC and the URL is guarded by a network/reverse-proxy ACL.`,
         { pluginId: manifest.id, route: r.route, action: 'ingress_unauthenticated_route' },
+      );
+    }
+  }
+}
+
+/**
+ * Warns about hmac-sha256 ingress routes whose declared timestamp is not actually bound into the
+ * signature. Declaring `timestampHeader` makes the host enforce timestamp freshness, but freshness
+ * alone does not stop a replay: if the provider's `contentTemplate` omits `{timestamp}`, the
+ * timestamp is UNSIGNED, so a captured (body, signature) pair can be re-sent with a freshly-minted
+ * timestamp and a new delivery id forever. Binding the timestamp (`contentTemplate` containing
+ * `{timestamp}`, e.g. `{timestamp}.{rawBody}`) makes the signed bytes expire with the window. The
+ * inverse declaration — a `{timestamp}` token with no `timestampHeader` — signs the empty string,
+ * which is equally inert. Warn-only (SDK v1 is additive within a major; a load-time rejection would
+ * break already-installed manifests). Called from PluginLoaderService.loadPlugin.
+ */
+export function warnUnsignedTimestampRoutes(
+  manifest: PluginManifest,
+  logger: { warn: (message: string, context?: Record<string, unknown>) => void },
+): void {
+  for (const r of manifest.ingress ?? []) {
+    if (r.signature.scheme !== 'hmac-sha256') continue; // only hmac templates can bind a timestamp
+    const signsTimestamp = (r.signature.contentTemplate ?? '{rawBody}').includes('{timestamp}');
+    if (r.signature.timestampHeader && !signsTimestamp) {
+      logger.warn(
+        `Ingress route '${r.route}' of plugin '${manifest.id}' declares timestampHeader ` +
+          `'${r.signature.timestampHeader}' but its contentTemplate does not sign it — the timestamp is ` +
+          `freshness-checked but UNSIGNED, so a replayed body can mint a fresh timestamp. Include ` +
+          `{timestamp} in the contentTemplate (e.g. '{timestamp}.{rawBody}') to bind it.`,
+        { pluginId: manifest.id, route: r.route, action: 'ingress_unsigned_timestamp' },
+      );
+    } else if (!r.signature.timestampHeader && signsTimestamp) {
+      logger.warn(
+        `Ingress route '${r.route}' of plugin '${manifest.id}' signs a {timestamp} token but declares no ` +
+          `timestampHeader — the token binds the empty string and no freshness check runs. Declare the ` +
+          `provider's timestamp header (and optionally toleranceSec) to activate the replay window.`,
+        { pluginId: manifest.id, route: r.route, action: 'ingress_unsigned_timestamp' },
       );
     }
   }
@@ -473,6 +626,12 @@ export interface PluginInstance {
   // First-party built-ins (engines, bundled extensions) run in-process; plugins loaded from the
   // plugins directory are untrusted and run sandboxed in a worker. `false` => sandboxed.
   builtIn?: boolean;
+  // Absolute path of the directory this plugin's package was loaded from. Usually
+  // <plugins.dir>/<id>, but the loader also scans the legacy plugins directory, and every later
+  // operation on the package — enable, uninstall, update, config UI — has to act on the tree the
+  // code actually came from rather than assume the configured one. Absent for built-ins, which are
+  // registered programmatically and have no on-disk package.
+  packageDir?: string;
 }
 
 // ============================================================================
@@ -494,4 +653,11 @@ export interface PluginRegistryEntry {
   activeSessions?: string[];
   // Per-session config overrides (keyed by sessionId), merged over `config` per session at hook time.
   sessionConfig?: Record<string, Record<string, unknown>>;
+  // The operator's standing decision, as opposed to `status`, which is where the runtime currently is.
+  // `status` is reset to INSTALLED on every load (enabling runs the lifecycle and is never inherited
+  // from a previous process), so it cannot carry intent across a restart — a restart used to silently
+  // turn every extension plugin off (#856). This field is what bootstrap restores from. Written only by
+  // the operator-facing enable/disable, never by the loader's own teardown. Absent on pre-#856 rows,
+  // which are adopted from a lingering ENABLED status on first load.
+  enabledByOperator?: boolean;
 }

@@ -1,15 +1,18 @@
 // Generates the committed OpenAPI snapshot by bootstrapping the Nest app WITHOUT listening,
 // then calling SwaggerModule.createDocument(). The script pins a hermetic environment below
-// (in-memory SQLite, queue/MCP off) so it is safe to run anywhere: no DB files are created or
-// touched, no Redis connection is opened, no engines start, no sessions run. The version is
-// sourced from package.json via swagger.config.ts, so the snapshot tracks releases automatically.
+// (in-memory main SQLite + a temp-dir data SQLite that is removed on exit, queue/MCP off) so it is
+// safe to run anywhere: no DB files are left behind, no Redis connection is opened, no engines
+// start, no sessions run. The version is sourced from package.json via swagger.config.ts, so the
+// snapshot tracks releases automatically.
 //
 // Usage: npx ts-node scripts/export-openapi.ts <output-path>
 import '../src/config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
-import { writeFileSync } from 'node:fs';
-import { createSwaggerConfig, exemptPublicOperations } from '../src/config/swagger.config';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createSwaggerConfig, dropUnexpressibleOperations, exemptPublicOperations } from '../src/config/swagger.config';
 
 // Pin a hermetic env BEFORE AppModule is imported. AppModule reads QUEUE_ENABLED / MCP_ENABLED at
 // module top-level (its conditional module mounts) and TypeORM reads the DB settings during
@@ -21,7 +24,19 @@ process.env.QUEUE_ENABLED = 'false';
 process.env.MCP_ENABLED = 'false';
 process.env.AUTO_START_SESSIONS = 'false';
 process.env.DATABASE_TYPE = 'sqlite';
-process.env.DATABASE_NAME = ':memory:';
+// Keep the throttler storage in-memory: with REDIS_ENABLED=true in the caller's env the export
+// would open a Redis connection for no benefit (the document doesn't change either way).
+process.env.REDIS_ENABLED = 'false';
+// The search module mounts conditionally on SEARCH_ENABLED (app.module.ts top-level), so an
+// export run with SEARCH_ENABLED=false in the caller's env would silently drop /api/search from
+// the snapshot. Pin it on — the committed snapshot documents the full default surface.
+process.env.SEARCH_ENABLED = 'true';
+// The 'data' connection must use a real SQLite file path to satisfy env-validation (an in-memory or
+// bare value is rejected to catch PostgreSQL db-name leaks — see env.validation.ts). Use a temp dir
+// so the export stays hermetic; the whole dir is removed in main()'s finally, and recursive rmSync
+// also drops any SQLite -wal/-shm sidecars. The 'main' connection keeps in-memory SQLite.
+const exportDataDir = mkdtempSync(join(tmpdir(), 'openapi-export-'));
+process.env.DATABASE_NAME = join(exportDataDir, 'export.sqlite');
 process.env.MAIN_DATABASE_NAME = ':memory:';
 
 async function main() {
@@ -46,15 +61,20 @@ async function main() {
   app.setGlobalPrefix('api');
   try {
     const doc = SwaggerModule.createDocument(app, createSwaggerConfig());
+    // Before the exemption pass, so it never spends work on an operation about to be removed.
+    dropUnexpressibleOperations(doc);
     exemptPublicOperations(doc);
     writeFileSync(out, JSON.stringify(doc, null, 2) + '\n');
-    console.log(`✓ OpenAPI snapshot written to ${out} (version ${doc.info.version}, ${Object.keys(doc.paths).length} paths)`);
+    console.log(
+      `✓ OpenAPI snapshot written to ${out} (version ${doc.info.version}, ${Object.keys(doc.paths).length} paths)`,
+    );
   } finally {
     await app.close();
+    rmSync(exportDataDir, { recursive: true, force: true });
   }
 }
 
-void main().catch((e) => {
+void main().catch(e => {
   console.error(e);
   process.exit(1);
 });

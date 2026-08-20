@@ -14,19 +14,28 @@ export class CreateSessionDto {
   @Matches(/^[a-zA-Z0-9-]+$/, {
     message: 'Session name can only contain letters, numbers, and hyphens',
   })
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional({
-    description: 'Session configuration options',
-    example: { autoReconnect: true },
+    description:
+      'Session configuration. Only three keys are read: autoRejectCalls (boolean, default false) ' +
+      'rejects incoming calls as soon as they ring — the call.received event is still emitted ' +
+      'first; maxReconnectAttempts (0-20, default unlimited) caps consecutive reconnects; and ' +
+      'reconnectBaseDelay (1000-300000 ms, default 5000) sets the backoff base. Anything else is ' +
+      'stored but ignored. All three can be changed later with PATCH /api/sessions/{sessionId}/config, ' +
+      'without restarting the session.',
+    example: { autoRejectCalls: false, maxReconnectAttempts: 5, reconnectBaseDelay: 5000 },
   })
   @IsOptional()
   config?: Record<string, unknown>;
 
   // Phase 3: Proxy per session
   @ApiPropertyOptional({
-    description: 'Proxy URL for this session (e.g., http://user:pass@proxy.example.com:8080)',
-    example: 'http://proxy.example.com:8080',
+    description:
+      'Optional per-session egress proxy URL (http/https/socks4/socks5; credentialed form ' +
+      '"http://user:pass@host" allowed). Must be a REAL, REACHABLE proxy — an unreachable value ' +
+      'silently blocks the WhatsApp WebSocket (no QR is ever delivered) and the session start times ' +
+      'out (~30s → 504 Gateway Timeout). Leave unset unless your network cannot reach WhatsApp directly.',
   })
   @IsOptional()
   @IsString()
