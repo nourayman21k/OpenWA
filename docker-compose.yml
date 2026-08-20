@@ -84,6 +84,7 @@ services:
     environment:
       # Core
       - NODE_ENV=${NODE_ENV:-production}
+      - AUTO_START_SESSIONS=${AUTO_START_SESSIONS:-false}
       # Writable HOME on tmpfs so Chromium's HOME-relative writes don't hit the read_only rootfs
       - HOME=/tmp
       # Chromium resolves its home from the passwd entry (no /home/openwa), ignoring $HOME, so without
@@ -158,6 +159,8 @@ services:
       - WEBHOOK_TIMEOUT=${WEBHOOK_TIMEOUT:-10000}
       - WEBHOOK_MAX_RETRIES=${WEBHOOK_MAX_RETRIES:-3}
       - WEBHOOK_RETRY_DELAY=${WEBHOOK_RETRY_DELAY:-5000}
+      - WEBHOOK_SSRF_PROTECT=${WEBHOOK_SSRF_PROTECT:-true}
+      - SSRF_ALLOWED_HOSTS=${SSRF_ALLOWED_HOSTS:-}
       # Rate Limit
       - RATE_LIMIT_TTL=${RATE_LIMIT_TTL:-60}
       - RATE_LIMIT_MAX=${RATE_LIMIT_MAX:-100}
